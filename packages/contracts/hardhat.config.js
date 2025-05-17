@@ -3,7 +3,6 @@ require("@nomiclabs/hardhat-ethers");
 require("@nomiclabs/hardhat-etherscan");
 require("solidity-coverage");
 require("hardhat-gas-reporter");
-require("@nomicfoundation/hardhat-foundry");
 
 const accounts = require("./hardhatAccountsList2k.js");
 const accountsList = accounts.accountsList;
