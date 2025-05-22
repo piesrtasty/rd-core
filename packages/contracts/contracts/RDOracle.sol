@@ -40,6 +40,11 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard {
      */
     uint256 internal constant _WAD = 1e18;
 
+    /**
+     * @notice Minimum age to use in TWAP
+     */
+    uint32 internal constant _MIN_PRICE_AGE = 60;
+
     // --- Registry ---
 
     /// @inheritdoc IRDOracle
@@ -80,7 +85,8 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard {
     Oracle.Observation[65535] public override observations;
 
     /// @inheritdoc IRDOracle
-    uint32 public override quotePeriod;
+    uint32 public override quotePeriodSlow;
+    uint32 public override quotePeriodFast;
 
     /// @inheritdoc IRDOracle
     string public override symbol = "RD / USD";
@@ -93,21 +99,25 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard {
     /**
      * @param  _vault Address of the vault
      * @param  _rdToken Address of the RD token
-     * @param  _quotePeriod Length in seconds of the TWAP used to consult the pool
+     * @param  _quotePeriodSlow Length in seconds of the TWAP used to consult the pool
+     * @param  _quotePeriodFast Length in seconds of the TWAP used to consult the pool
      * @param  _stablecoins Array of addresses of the stablecoins in the pool
      * @param  _minObservationDelta The minimum observation delta
      */
     constructor(
         address _vault,
         address _rdToken,
-        uint32 _quotePeriod,
+        uint32 _quotePeriodFast,
+        uint32 _quotePeriodSlow,
         address[] memory _stablecoins,
         uint32 _minObservationDelta
     ) VaultGuard(IVault(_vault)) {
+        require(_quotePeriodFast < _quotePeriodSlow, "RDOracle/period-mismatch fast period should be lt slow period");
         vault = _vault;
         rdToken = _rdToken;
         _stablecoinBasket = _stablecoins;
-        quotePeriod = _quotePeriod;
+        quotePeriodFast = _quotePeriodFast;
+        quotePeriodSlow = _quotePeriodSlow;
         minObservationDelta = _minObservationDelta;
         // Initialize oracle state with price of 1 RD/USD
         _initialize(2 ** 96);
@@ -164,27 +174,71 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard {
     // --- Methods ---
 
     /// @inheritdoc IRDOracle
-    function getResultWithValidity() external view returns (uint256 _result, bool _validity) {
+    function getFastResultWithValidity() public view returns (uint256 _fastResult, bool _fastValidity) {
         // If the pool doesn't have enough history return false
 
         uint32[] memory secondsAgos = new uint32[](2);
-        secondsAgos[0] = quotePeriod;
-        secondsAgos[1] = 0;
+        secondsAgos[0] = quotePeriodFast;
+        secondsAgos[1] = _MIN_PRICE_AGE;
         (int56[] memory tickCumulatives, ) = this.observe(secondsAgos);
         int56 tickCumulativesDelta = tickCumulatives[1] - tickCumulatives[0];
-        int24 arithmeticMeanTick = int24(tickCumulativesDelta / int56(int32(quotePeriod)));
+        int24 arithmeticMeanTick = int24(tickCumulativesDelta / int56(int32(quotePeriodFast)));
+        uint160 sqrtPriceX96 = TickMath.getSqrtRatioAtTick(arithmeticMeanTick);
+        _fastResult = _convertSqrtPriceX96ToPrice(sqrtPriceX96);
+        _fastValidity = true;
+    }
+
+    /// @inheritdoc IRDOracle
+    function readFast() external view returns (uint256 _result) {
+        (uint256 _fastResult, bool _validity) = this.getFastResultWithValidity();
+        if (!_validity) {
+            revert Oracle_InvalidResult();
+        }
+        return _fastResult;
+    }
+
+    /// @inheritdoc IRDOracle
+    function getSlowResultWithValidity() public view returns (uint256 _result, bool _validity) {
+        // If the pool doesn't have enough history return false
+
+        uint32[] memory secondsAgos = new uint32[](2);
+        secondsAgos[0] = quotePeriodSlow;
+        secondsAgos[1] = _MIN_PRICE_AGE;
+        (int56[] memory tickCumulatives, ) = this.observe(secondsAgos);
+        int56 tickCumulativesDelta = tickCumulatives[1] - tickCumulatives[0];
+        int24 arithmeticMeanTick = int24(tickCumulativesDelta / int56(int32(quotePeriodSlow)));
         uint160 sqrtPriceX96 = TickMath.getSqrtRatioAtTick(arithmeticMeanTick);
         _result = _convertSqrtPriceX96ToPrice(sqrtPriceX96);
         _validity = true;
     }
 
     /// @inheritdoc IRDOracle
-    function read() external view returns (uint256 _value) {
-        (uint256 _result, bool _validity) = this.getResultWithValidity();
+    function readSlow() external view returns (uint256 _result) {
+        (uint256 _slowResult, bool _validity) = this.getSlowResultWithValidity();
         if (!_validity) {
             revert Oracle_InvalidResult();
         }
-        return _result;
+        return _slowResult;
+    }
+
+    function getFastSlowResultWithValidity() external view returns (uint256 _fastResult, bool _fastValidity,
+                                                                    uint256 _slowResult, bool _slowValidity) {
+        // If the pool doesn't have enough history return false
+
+        (_fastResult, _fastValidity) = getFastResultWithValidity(); 
+        (_slowResult, _slowValidity) = getSlowResultWithValidity(); 
+
+    }
+
+    /// @inheritdoc IRDOracle
+    function readFastSlow() external view returns (uint256 _fastValue, uint256 _slowValue) {
+        (uint256 _fastResult, bool _fastValidity) = this.getFastResultWithValidity();
+        (uint256 _slowResult, bool _slowValidity) = this.getSlowResultWithValidity();
+        if (!_fastValidity || !_slowValidity) {
+            revert Oracle_InvalidResult();
+        }
+
+        return (_fastResult, _slowResult);
     }
 
     /// @inheritdoc IRDOracle

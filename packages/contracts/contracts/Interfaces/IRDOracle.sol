@@ -92,10 +92,16 @@ interface IRDOracle {
     function rdTokenIndex() external view returns (uint8 _rdTokenIndex);
 
     /**
-     * @notice The length of the TWAP used to consult the pool
+     * @notice The fast(shorter) length of the TWAP used to consult the pool
      * @return _quotePeriod The length of the TWAP used to consult the pool
      */
-    function quotePeriod() external view returns (uint32 _quotePeriod);
+    function quotePeriodFast() external view returns (uint32 _quotePeriod);
+
+    /**
+     * @notice The slow(longer) length of the TWAP used to consult the pool
+     * @return _quotePeriod The length of the TWAP used to consult the pool
+     */
+    function quotePeriodSlow() external view returns (uint32 _quotePeriod);
 
     /**
      * @notice Symbol of the quote (e.g. 'RD / USD')
@@ -165,19 +171,42 @@ interface IRDOracle {
     // --- Methods ---
 
     /**
-     * @notice Fetch the latest oracle result and whether it is valid or not
+     * @notice Fetch the latest fast oracle result and whether it is valid or not
      * @dev    This method should never revert
-     * @return _result The latest oracle result
-     * @return _validity Whether the oracle result is valid
+     * @return _result The latest fast oracle result
+     * @return _validity Whether the fast oracle result is valid
      */
-    function getResultWithValidity() external view returns (uint256 _result, bool _validity);
+    function getFastResultWithValidity() external view returns (uint256 _result, bool _validity);
 
     /**
-     * @notice Fetch the latest oracle result
-     * @dev    Will revert if is the price feed is invalid
-     * @return _value The latest oracle result
+     * @notice Fetch the latest slow oracle result and whether it is valid or not
+     * @dev    This method should never revert
+     * @return _result The latest slow oracle result
+     * @return _validity Whether the slow oracle result is valid
      */
-    function read() external view returns (uint256 _value);
+    function getSlowResultWithValidity() external view returns (uint256 _result, bool _validity);
+
+    /**
+     * @notice Fetch the latest fast oracle result
+     * @dev    Will revert if is the price feed is invalid
+     * @return _value The latest fast oracle result
+     */
+    function readFast() external view returns (uint256 _value);
+
+    /**
+     * @notice Fetch the latest slow oracle result
+     * @dev    Will revert if is the price feed is invalid
+     * @return _value The latest slow oracle result
+     */
+    function readSlow() external view returns (uint256 _value);
+
+    /**
+     * @notice Fetch the latest fast and slow oracle results
+     * @dev    Will revert if is the price feed is invalid
+     * @return _fastValue The latest slow oracle result
+     * @return _slowValue The latest slow oracle result
+     */
+    function readFastSlow() external view returns (uint256 _fastValue, uint256 _slowValue);
 
     /**
      * @notice Returns the cumulative tick and liquidity as of each timestamp `secondsAgo` from the current block timestamp
