@@ -19,10 +19,12 @@ contract BorrowerOperationsTester is BorrowerOperations {
         uint _price
     ) 
     external
-    pure
+    view
     returns (uint)
     {
-        return _getNewICRFromTroveChange(_coll, _debt, _collChange, isCollIncrease, _debtChange, isDebtIncrease, _price);
+        uint par = relayer.par();
+        return _getNewICRFromTroveChange(_coll, _debt, _collChange, isCollIncrease,
+                                         _debtChange, isDebtIncrease, _price, par);
     }
 
     function getNewTCRFromTroveChange
@@ -37,7 +39,10 @@ contract BorrowerOperationsTester is BorrowerOperations {
     view
     returns (uint) 
     {
-        return _getNewTCRFromTroveChange(_collChange, isCollIncrease, _debtChange, isDebtIncrease, _price);
+        uint par = relayer.par();
+        uint accRate = troveManager.accumulatedRate();
+        return _getNewTCRFromTroveChange(_collChange, isCollIncrease, _debtChange,
+                                         isDebtIncrease, _price, par, accRate);
     }
 
     function getUSDValue(uint _coll, uint _price) external pure returns (uint) {
@@ -54,7 +59,7 @@ contract BorrowerOperationsTester is BorrowerOperations {
         address _lowerHint)
         external 
     {
-        _adjustTrove(_borrower, _collWithdrawal, _debtChange, _isDebtIncrease, _upperHint, _lowerHint, 0);
+        _adjustTrove(_borrower, _collWithdrawal, _debtChange, _isDebtIncrease, _upperHint, _lowerHint);
     }
 
 

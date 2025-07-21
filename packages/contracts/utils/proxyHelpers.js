@@ -92,7 +92,7 @@ class BorrowerOperationsProxy extends Proxy {
   }
 
   async openTrove(...params) {
-    return this.forwardFunction(params, 'openTrove(uint256,uint256,address,address)')
+    return this.forwardFunction(params, 'openTrove(uint256,address,address)')
   }
 
   async addColl(...params) {
@@ -187,12 +187,20 @@ class TroveManagerProxy extends Proxy {
     return this.proxyFunctionWithUser('getTroveDebt', user)
   }
 
+  async getTroveActualDebt(user) {
+    return this.proxyFunctionWithUser('getTroveActualDebt', user)
+  }
+
   async getTroveColl(user) {
     return this.proxyFunctionWithUser('getTroveColl', user)
   }
 
   async totalStakes() {
     return this.proxyFunction('totalStakes', [])
+  }
+
+  async relayer() {
+    return this.proxyFunction('relayer', [])
   }
 
   async getPendingETHReward(...params) {

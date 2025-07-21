@@ -53,6 +53,9 @@ contract('Access Control: Liquity functions with the caller restricted to Liquit
     defaultPool = coreContracts.defaultPool
     functionCaller = coreContracts.functionCaller
     borrowerOperations = coreContracts.borrowerOperations
+    relayer = coreContracts.relayer
+    parControl = coreContracts.parControl
+    rateControl = coreContracts.rateControl
 
     lqtyStaking = LQTYContracts.lqtyStaking
     lqtyToken = LQTYContracts.lqtyToken
@@ -327,7 +330,7 @@ contract('Access Control: Liquity functions with the caller restricted to Liquit
     it("offset(): reverts when called by an account that is not TroveManager", async () => {
       // Attempt call from alice
       try {
-        txAlice = await stabilityPool.offset(100, 10, { from: alice })
+        txAlice = await stabilityPool.offset(100, 100, 10, { from: alice })
         assert.fail(txAlice)
       } catch (err) {
         assert.include(err.message, "revert")
@@ -522,6 +525,65 @@ contract('Access Control: Liquity functions with the caller restricted to Liquit
       const tx1 = communityIssuance.issueLQTY({from: alice})
 
       assertRevert(tx1)
+    })
+  })
+  describe('Relayer', async accounts => {
+    // applyPendingRewards
+    it("updateParWithMarket(): reverts when caller is not the MarketOracle contract", async () => {
+      // Attempt call from alice
+      try {
+        const txAlice = await relayer.updateParWithMarket(dec(1000,18), { from: alice })
+        
+      } catch (err) {
+         assert.include(err.message, "revert")
+         assert.include(err.message, "Caller is not the MarketOracle")
+      }
+    })
+    it("updateRateWithMarket(): reverts when caller is not the MarketOracle contract", async () => {
+      // Attempt call from alice
+      try {
+        const txAlice = await relayer.updateRateWithMarket(dec(1000,18), { from: alice })
+        
+      } catch (err) {
+         assert.include(err.message, "revert")
+         assert.include(err.message, "Caller is not the MarketOracle")
+      }
+    })
+    it("updateRateAndParWithMarket(): reverts when caller is not the MarketOracle contract", async () => {
+      // Attempt call from alice
+      try {
+        const txAlice = await relayer.updateRateAndParWithMarket(dec(1000,18), dec(1000,18), { from: alice })
+        
+      } catch (err) {
+         assert.include(err.message, "revert")
+         assert.include(err.message, "Caller is not the MarketOracle contract")
+      }
+    })
+  })
+  describe('ParControl', async accounts => {
+    // applyPendingRewards
+    it("update(): reverts when caller is not Relayer", async () => {
+      // Attempt call from alice
+      try {
+        const txAlice = await parControl.update(dec(1000,18), { from: alice })
+        
+      } catch (err) {
+         assert.include(err.message, "revert")
+         assert.include(err.message, "Caller is not the Relayer contract")
+      }
+    })
+  })
+  describe('RateControl', async accounts => {
+    // applyPendingRewards
+    it("update(): reverts when caller is not Relayer", async () => {
+      // Attempt call from alice
+      try {
+        const txAlice = await rateControl.update(dec(1000,18), { from: alice })
+        
+      } catch (err) {
+         assert.include(err.message, "revert")
+         assert.include(err.message, "Caller is not the Relayer contract")
+      }
     })
   })
 

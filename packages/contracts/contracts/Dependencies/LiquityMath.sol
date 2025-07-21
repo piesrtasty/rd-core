@@ -29,6 +29,26 @@ library LiquityMath {
         return (_a >= _b) ? _a : _b;
     }
 
+
+    /**
+     * @notice Safely subtracts two uint256 values and returns a signed int256 result.
+     * @dev Reverts if the difference overflows int256.
+     * @param a The minuend (left side of subtraction).
+     * @param b The subtrahend (right side of subtraction).
+     * @return result Signed result of (a - b) as int256.
+     */
+    function safeSignedSub(uint256 a, uint256 b) internal pure returns (int256 result) {
+        if (a >= b) {
+            uint256 diff = a.sub(b);
+            require(diff <= uint256(type(int256).max), "SignedSafeMath: overflow");
+            return int256(diff);
+        } else {
+            uint256 diff = b.sub(a);
+            require(diff <= uint256(type(int256).max), "SignedSafeMath: overflow");
+            return -int256(diff);
+        }
+    }
+
     /* 
     * Multiply two decimal numbers and use normal rounding rules:
     * -round product up if 19'th mantissa digit >= 5
@@ -85,6 +105,37 @@ library LiquityMath {
         return decMul(x, y);
   }
 
+  function _rpower(uint256 x, uint256 n, uint256 base) internal pure returns (uint256 z) {
+    assembly {
+        switch x
+        case 0 {
+            switch n
+            case 0 { z := base }
+            default { z := 0 }
+        }
+        default {
+            switch mod(n, 2)
+            case 0 { z := base }
+            default { z := x }
+            let half := div(base, 2) // for rounding.
+            for { n := div(n, 2) } n { n := div(n, 2) } {
+                let xx := mul(x, x)
+                if iszero(eq(div(xx, x), x)) { revert(0, 0) }
+                let xxRound := add(xx, half)
+                if lt(xxRound, xx) { revert(0, 0) }
+                x := div(xxRound, base)
+                if mod(n, 2) {
+                    let zx := mul(z, x)
+                    if and(iszero(iszero(x)), iszero(eq(div(zx, x), z))) { revert(0, 0) }
+                    let zxRound := add(zx, half)
+                    if lt(zxRound, zx) { revert(0, 0) }
+                    z := div(zxRound, base)
+                }
+            }
+        }
+    }
+}
+
     function _getAbsoluteDifference(uint _a, uint _b) internal pure returns (uint) {
         return (_a >= _b) ? _a.sub(_b) : _b.sub(_a);
     }
@@ -99,9 +150,9 @@ library LiquityMath {
         }
     }
 
-    function _computeCR(uint _coll, uint _debt, uint _price) internal pure returns (uint) {
+    function _computeCR(uint _coll, uint _debt, uint _price, uint _par) internal pure returns (uint) {
         if (_debt > 0) {
-            uint newCollRatio = _coll.mul(_price).div(_debt);
+            uint newCollRatio = _coll.mul(_price).mul(DECIMAL_PRECISION).div(_debt.mul(_par));
 
             return newCollRatio;
         }

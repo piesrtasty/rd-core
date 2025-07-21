@@ -7,7 +7,9 @@ import "./LiquityMath.sol";
 import "../Interfaces/IActivePool.sol";
 import "../Interfaces/IDefaultPool.sol";
 import "../Interfaces/IPriceFeed.sol";
+import "../Interfaces/IRelayer.sol";
 import "../Interfaces/ILiquityBase.sol";
+import "../Dependencies/console.sol";
 
 /* 
 * Base contract for TroveManager, BorrowerOperations and StabilityPool. Contains global system constants and
@@ -41,6 +43,8 @@ contract LiquityBase is BaseMath, ILiquityBase {
 
     IPriceFeed public override priceFeed;
 
+    IRelayer public relayer; 
+
     // --- Gas compensation functions ---
 
     // Returns the composite debt (drawn debt + gas compensation) of a trove, for the purpose of ICR calculation
@@ -64,24 +68,67 @@ contract LiquityBase is BaseMath, ILiquityBase {
         return activeColl.add(liquidatedColl);
     }
 
-    function getEntireSystemDebt() public view returns (uint entireSystemDebt) {
+    function getEntireSystemDebt(uint accumulatedRate) public view returns (uint entireSystemDebt) {
+        //return _actualDebt(getEntireNormalizedSystemDebt(), accumulatedRate);
+        return getEntireNormalizedSystemDebt().mul(accumulatedRate).div(RATE_PRECISION);
+    }
+
+    function getEntireNormalizedSystemDebt() public view returns (uint entireSystemDebt) {
         uint activeDebt = activePool.getLUSDDebt();
         uint closedDebt = defaultPool.getLUSDDebt();
 
         return activeDebt.add(closedDebt);
     }
 
-    function _getTCR(uint _price) internal view returns (uint TCR) {
-        uint entireSystemColl = getEntireSystemColl();
-        uint entireSystemDebt = getEntireSystemDebt();
+    function updatePar() public returns (uint par) {
+        return relayer.updatePar();
+    }
 
-        TCR = LiquityMath._computeCR(entireSystemColl, entireSystemDebt, _price);
+    // Returns the normalized debt from actual debt
+    function _normalizedDebt(uint256 debt, uint256 rate) internal pure returns (uint256 normDebt) {
+        normDebt = debt.mul(RATE_PRECISION).div(rate);
+
+        // Round up if rounding caused an underestimation
+        /*
+        if (normDebt.mul(rate).div(RATE_PRECISION) < debt) {
+            normDebt += 1;
+        }
+        */
+    }
+
+    // Returns the actual debt from normalized debt
+    function _actualDebt(uint256 normalizedDebt, uint256 rate) internal pure returns (uint256 actualDebt) {
+        actualDebt = normalizedDebt.mul(rate).div(RATE_PRECISION);
+
+        // Round up if rounding caused an underestimation
+        /*
+        if (actualDebt.mul(RATE_PRECISION).div(rate) < normalizedDebt) {
+            actualDebt += 1;
+        }
+        */
+
+    }
+
+    /*
+    // Returns the actual debt from normalized debt
+    function _actualDebt(uint256 normalizedDebt, uint256 rate) internal pure returns (uint256) {
+        return normalizedDebt.mul(rate).div(RATE_PRECISION);
+    }
+    */
+
+
+    function _getTCR(uint _price, uint _accRate) internal view returns (uint TCR) {
+        uint entireSystemColl = getEntireSystemColl();
+        uint entireSystemDebt = getEntireSystemDebt(_accRate);
+        uint par = relayer.par();
+
+        TCR = LiquityMath._computeCR(entireSystemColl, entireSystemDebt, _price, par);
 
         return TCR;
     }
 
-    function _checkRecoveryMode(uint _price) internal view returns (bool) {
-        uint TCR = _getTCR(_price);
+    function _checkRecoveryMode(uint _price, uint _accRate) internal view returns (bool) {
+        uint TCR = _getTCR(_price, _accRate);
 
         return TCR < CCR;
     }

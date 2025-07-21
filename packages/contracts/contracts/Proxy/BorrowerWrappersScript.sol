@@ -6,10 +6,11 @@ import "../Dependencies/SafeMath.sol";
 import "../Dependencies/LiquityMath.sol";
 import "../Dependencies/IERC20.sol";
 import "../Interfaces/IBorrowerOperations.sol";
-import "../Interfaces/ITroveManager.sol";
+import "../Interfaces/ITroveManagerRelayer.sol";
 import "../Interfaces/IStabilityPool.sol";
 import "../Interfaces/IPriceFeed.sol";
 import "../Interfaces/ILQTYStaking.sol";
+import "../Interfaces/IRelayer.sol";
 import "./BorrowerOperationsScript.sol";
 import "./ETHTransferScript.sol";
 import "./LQTYStakingScript.sol";
@@ -21,24 +22,26 @@ contract BorrowerWrappersScript is BorrowerOperationsScript, ETHTransferScript, 
 
     string constant public NAME = "BorrowerWrappersScript";
 
-    ITroveManager immutable troveManager;
+    ITroveManagerRelayer immutable troveManager;
     IStabilityPool immutable stabilityPool;
     IPriceFeed immutable priceFeed;
     IERC20 immutable lusdToken;
     IERC20 immutable lqtyToken;
     ILQTYStaking immutable lqtyStaking;
+    IRelayer immutable relayer;
 
     constructor(
         address _borrowerOperationsAddress,
         address _troveManagerAddress,
-        address _lqtyStakingAddress
+        address _lqtyStakingAddress,
+        address _relayerAddress
     )
         BorrowerOperationsScript(IBorrowerOperations(_borrowerOperationsAddress))
         LQTYStakingScript(_lqtyStakingAddress)
         public
     {
         checkContract(_troveManagerAddress);
-        ITroveManager troveManagerCached = ITroveManager(_troveManagerAddress);
+        ITroveManagerRelayer troveManagerCached = ITroveManagerRelayer(_troveManagerAddress);
         troveManager = troveManagerCached;
 
         IStabilityPool stabilityPoolCached = troveManagerCached.stabilityPool();
@@ -60,6 +63,11 @@ contract BorrowerWrappersScript is BorrowerOperationsScript, ETHTransferScript, 
         ILQTYStaking lqtyStakingCached = troveManagerCached.lqtyStaking();
         require(_lqtyStakingAddress == address(lqtyStakingCached), "BorrowerWrappersScript: Wrong LQTYStaking address");
         lqtyStaking = lqtyStakingCached;
+
+        IRelayer relayerCached = troveManagerCached.relayer();
+        require(_relayerAddress == address(relayerCached), "BorrowerWrappersScript: Wrong relayer address");
+        relayer = relayerCached;
+
     }
 
     function claimCollateralAndOpenTrove(uint _maxFee, uint _LUSDAmount, address _upperHint, address _lowerHint) external payable {
@@ -76,7 +84,7 @@ contract BorrowerWrappersScript is BorrowerOperationsScript, ETHTransferScript, 
         uint totalCollateral = balanceAfter.sub(balanceBefore).add(msg.value);
 
         // Open trove with obtained collateral, plus collateral sent by user
-        borrowerOperations.openTrove{ value: totalCollateral }(_maxFee, _LUSDAmount, _upperHint, _lowerHint);
+        borrowerOperations.openTrove{ value: totalCollateral }(_LUSDAmount, _upperHint, _lowerHint);
     }
 
     function claimSPRewardsAndRecycle(uint _maxFee, address _upperHint, address _lowerHint) external {
@@ -94,7 +102,7 @@ contract BorrowerWrappersScript is BorrowerOperationsScript, ETHTransferScript, 
         if (claimedCollateral > 0) {
             _requireUserHasTrove(address(this));
             uint LUSDAmount = _getNetLUSDAmount(claimedCollateral);
-            borrowerOperations.adjustTrove{ value: claimedCollateral }(_maxFee, 0, LUSDAmount, true, _upperHint, _lowerHint);
+            borrowerOperations.adjustTrove{ value: claimedCollateral }(0, LUSDAmount, true, _upperHint, _lowerHint);
             // Provide withdrawn LUSD to Stability Pool
             if (LUSDAmount > 0) {
                 stabilityPool.provideToSP(LUSDAmount, address(0));
@@ -124,7 +132,7 @@ contract BorrowerWrappersScript is BorrowerOperationsScript, ETHTransferScript, 
         if (gainedCollateral > 0) {
             _requireUserHasTrove(address(this));
             netLUSDAmount = _getNetLUSDAmount(gainedCollateral);
-            borrowerOperations.adjustTrove{ value: gainedCollateral }(_maxFee, 0, netLUSDAmount, true, _upperHint, _lowerHint);
+            borrowerOperations.adjustTrove{ value: gainedCollateral }(0, netLUSDAmount, true, _upperHint, _lowerHint);
         }
 
         uint totalLUSD = gainedLUSD.add(netLUSDAmount);
@@ -144,12 +152,14 @@ contract BorrowerWrappersScript is BorrowerOperationsScript, ETHTransferScript, 
     function _getNetLUSDAmount(uint _collateral) internal returns (uint) {
         uint price = priceFeed.fetchPrice();
         uint ICR = troveManager.getCurrentICR(address(this), price);
+        uint par = relayer.par();
 
-        uint LUSDAmount = _collateral.mul(price).div(ICR);
-        uint borrowingRate = troveManager.getBorrowingRateWithDecay();
-        uint netDebt = LUSDAmount.mul(LiquityMath.DECIMAL_PRECISION).div(LiquityMath.DECIMAL_PRECISION.add(borrowingRate));
+        uint LUSDAmount = _collateral.mul(price).mul(1e18).div(ICR).div(par);
+        //uint borrowingRate = troveManager.getBorrowingRateWithDecay();
+        //uint netDebt = LUSDAmount.mul(LiquityMath.DECIMAL_PRECISION).div(LiquityMath.DECIMAL_PRECISION.add(borrowingRate));
 
-        return netDebt;
+        //return netDebt;
+        return LUSDAmount;
     }
 
     function _requireUserHasTrove(address _depositor) internal view {

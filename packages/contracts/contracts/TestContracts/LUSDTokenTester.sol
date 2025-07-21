@@ -7,6 +7,8 @@ import "../LUSDToken.sol";
 contract LUSDTokenTester is LUSDToken {
     
     bytes32 private immutable _PERMIT_TYPEHASH = 0x6e71edae12b1b97f4d1f60370fef10105fa2faae0126114a169c64845d6126c9;
+
+    uint public unprotectedSupply;
     
     constructor( 
         address _troveManagerAddress,
@@ -18,13 +20,14 @@ contract LUSDTokenTester is LUSDToken {
     
     function unprotectedMint(address _account, uint256 _amount) external {
         // No check on caller here
-
+        unprotectedSupply += _amount;
         _mint(_account, _amount);
     }
 
     function unprotectedBurn(address _account, uint _amount) external {
         // No check on caller here
         
+        unprotectedSupply -= _amount;
         _burn(_account, _amount);
     }
 

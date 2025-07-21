@@ -62,10 +62,11 @@ interface IStabilityPool {
     event UserDepositChanged(address indexed _depositor, uint _newDeposit);
     event FrontEndStakeChanged(address indexed _frontEnd, uint _newFrontEndStake, address _depositor);
 
-    event ETHGainWithdrawn(address indexed _depositor, uint _ETH, uint _LUSDLoss);
+    event ETHGainWithdrawn(address indexed _depositor, uint _ETH, int _LUSDLoss);
     event LQTYPaidToDepositor(address indexed _depositor, uint _LQTY);
     event LQTYPaidToFrontEnd(address indexed _frontEnd, uint _LQTY);
     event EtherSent(address _to, uint _amount);
+    event DistributeToSP(uint P, uint newP, uint lusdGain, uint totalLUSDDeposits);
 
     // --- Functions ---
 
@@ -83,6 +84,7 @@ interface IStabilityPool {
         address _communityIssuanceAddress
     ) external;
 
+    function distributeToSP(uint _amount) external;
     /*
      * Initial checks:
      * - Frontend is registered or zero address
@@ -145,7 +147,7 @@ interface IStabilityPool {
      * and transfers the Trove's ETH collateral from ActivePool to StabilityPool.
      * Only called by liquidation functions in the TroveManager.
      */
-    function offset(uint _debt, uint _coll) external;
+    function offset(uint _debt, uint _nDebt, uint _coll) external;
 
     /*
      * Returns the total amount of ETH held by the pool, accounted in an internal variable instead of `balance`,

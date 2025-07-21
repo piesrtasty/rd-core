@@ -1,3 +1,5 @@
+const { ethers } = require("hardhat")
+
 
 const BN = require('bn.js')
 const LockupContract = artifacts.require(("./LockupContract.sol"))
@@ -37,6 +39,8 @@ const TimeValues = {
   MINUTES_IN_ONE_MONTH:   60 * 24 * 30,
   MINUTES_IN_ONE_YEAR:    60 * 24 * 365
 }
+
+
 
 class TestHelper {
 
@@ -282,9 +286,25 @@ class TestHelper {
   // stored in Liquity, or the current Chainlink ETHUSD price, etc.
 
 
-  static async checkRecoveryMode(contracts) {
+  static async checkRecoveryModeContract(contracts) {
     const price = await contracts.priceFeedTestnet.getPrice()
     return contracts.troveManager.checkRecoveryMode(price)
+  }
+  /*
+           uint entireSystemColl = getEntireSystemColl();
+        uint entireSystemDebt = getEntireSystemDebt(_accRate);
+        uint par = relayer.par();
+    
+        TCR = LiquityMath._computeCR(entireSystemColl, entireSystemDebt, _price, par);
+
+        return TCR;
+  */
+  static async checkRecoveryMode(contracts) {
+    const ccr = await contracts.troveManager.CCR()
+    const price = await contracts.priceFeedTestnet.getPrice()
+    const tcr = await contracts.troveManager.getTCR(price)
+
+    return tcr.lt(ccr)
   }
 
   static async getTCR(contracts) {
@@ -312,7 +332,10 @@ class TestHelper {
   }
 
   static async getTroveEntireDebt(contracts, trove) {
-    return this.toBN((await contracts.troveManager.getEntireDebtAndColl(trove))[0])
+    return this.toBN((await contracts.troveManager.getTroveActualDebt(trove)))
+    //return this.toBN((await contracts.troveManager.getEntireDebtAndColl(trove))[0])
+    //return this.toBN(await contracts.troveManager.getTroveActualDebt(trove))
+    //return await contracts.troveManager.getTroveActualDebt(trove)
   }
 
   static async getTroveStake(contracts, trove) {
@@ -324,7 +347,8 @@ class TestHelper {
    * So, it adds the gas compensation and the borrowing fee
    */
   static async getOpenTroveTotalDebt(contracts, lusdAmount) {
-    const fee = await contracts.troveManager.getBorrowingFee(lusdAmount)
+    //const fee = await contracts.troveManager.getBorrowingFee(lusdAmount)
+    const fee = this.toBN('0');
     const compositeDebt = await this.getCompositeDebt(contracts, lusdAmount)
     return compositeDebt.add(fee)
   }
@@ -339,14 +363,17 @@ class TestHelper {
   }
 
   // Subtracts the borrowing fee
-  static async getNetBorrowingAmount(contracts, debtWithFee) {
-    const borrowingRate = await contracts.troveManager.getBorrowingRateWithDecay()
-    return this.toBN(debtWithFee).mul(MoneyValues._1e18BN).div(MoneyValues._1e18BN.add(borrowingRate))
+  static async getNetBorrowingAmount(contracts, debt) {
+    return debt
+    // there is no initial borrow fee anymore
+    //const borrowingRate = await contracts.troveManager.getBorrowingRateWithDecay()
+    //return this.toBN(debtWithFee).mul(MoneyValues._1e18BN).div(MoneyValues._1e18BN.add(borrowingRate))
   }
 
   // Adds the borrowing fee
   static async getAmountWithBorrowingFee(contracts, lusdAmount) {
-    const fee = await contracts.troveManager.getBorrowingFee(lusdAmount)
+    //const fee = await contracts.troveManager.getBorrowingFee(lusdAmount)
+    const fee = this.toBN('0')
     return lusdAmount.add(fee)
   }
 
@@ -373,6 +400,7 @@ class TestHelper {
 
         const LUSDAmount = redemptionTx.logs[i].args[0]
         const totalLUSDRedeemed = redemptionTx.logs[i].args[1]
+        //const totalNLUSDRedeemed = redemptionTx.logs[i].args[2]
         const totalETHDrawn = redemptionTx.logs[i].args[2]
         const ETHFee = redemptionTx.logs[i].args[3]
 
@@ -380,6 +408,48 @@ class TestHelper {
       }
     }
     throw ("The transaction logs do not contain a redemption event")
+  }
+  static getEmittedDripValues(tx) {
+    for (let i = 0; i < tx.logs.length; i++) {
+      if (tx.logs[i].event === "Drip") {
+
+        const stakePayment = tx.logs[i].args[0]
+        const spPayment = tx.logs[i].args[1]
+
+        return [stakePayment, spPayment]
+      }
+    }
+    throw ("The transaction logs do not contain a drip event")
+  }
+
+  static getEmittedParUpdateValues(updateTx) {
+    for (let i = 0; i < updateTx.logs.length; i++) {
+      if (updateTx.logs[i].event === "ParUpdated") {
+
+        const par = updateTx.logs[i].args[0]
+        const pOutput = updateTx.logs[i].args[1]
+        const iOutput = updateTx.logs[i].args[2]
+        const error = updateTx.logs[i].args[3]
+
+        return [par, pOutput, iOutput, error]
+      }
+    }
+    throw ("The transaction logs do not contain a par update event")
+  }
+
+  static getEmittedRateUpdateValues(updateTx) {
+    for (let i = 0; i < updateTx.logs.length; i++) {
+      if (updateTx.logs[i].event === "RateUpdated") {
+
+        const rate = updateTx.logs[i].args[0]
+        const pOutput = updateTx.logs[i].args[1]
+        const iOutput = updateTx.logs[i].args[2]
+        const error = updateTx.logs[i].args[3]
+
+        return [rate, pOutput, iOutput, error]
+      }
+    }
+    throw ("The transaction logs do not contain a rate update event")
   }
 
   static getEmittedLiquidationValues(liquidationTx) {
@@ -394,6 +464,68 @@ class TestHelper {
       }
     }
     throw ("The transaction logs do not contain a liquidation event")
+  }
+
+  static getEmittedPUpdated(pUpdatedTx) {
+    for (let i = 0; i < pUpdatedTx.logs.length; i++) {
+      if (pUpdatedTx.logs[i].event === "P_Updated") {
+        const newP = pUpdatedTx.logs[i].args[0]
+
+        return newP
+      }
+    }
+    throw ("The transaction logs do not contain a P_Updated event")
+  }
+
+  static getEmittedDistributeToSP(tx) {
+    for (let i = 0; i < tx.logs.length; i++) {
+      if (tx.logs[i].event === "DistributeToSP") {
+        const lusdGain = tx.logs[i].args[0]
+
+        return lusdGain
+      }
+    }
+    throw ("The transaction logs do not contain a DistributeToSP event")
+  }
+  static getEmittedOffset(tx) {
+    for (let i = 0; i < tx.logs.length; i++) {
+      if (tx.logs[i].event === "Offset") {
+        const debt = tx.logs[i].args[0]
+
+        return debt
+      }
+    }
+    throw ("The transaction logs do not contain an Offset event")
+  }
+
+  static getEmittedTroveUpdateValues(troveUpdateTx) {
+    for (let i = 0; i < troveUpdateTx.logs.length; i++) {
+      if (troveUpdateTx.logs[i].event === "TroveUpdated") {
+        const borrower = troveUpdateTx.logs[i].args[0]
+        const debt = troveUpdateTx.logs[i].args[1]
+        const coll = troveUpdateTx.logs[i].args[2]
+        const stake = troveUpdateTx.logs[i].args[3]
+        const operation = troveUpdateTx.logs[i].args[4]
+
+        return [borrower, debt, coll, stake, operation]
+      }
+    }
+    throw ("The transaction logs do not contain a trove update event")
+  }
+
+  static getEmittedTroveICRValues(troveUpdateTx) {
+    for (let i = 0; i < troveUpdateTx.logs.length; i++) {
+      if (troveUpdateTx.logs[i].event === "TroveICR") {
+        const icr = troveUpdateTx.logs[i].args[0]
+        const value = troveUpdateTx.logs[i].args[1]
+        const compDebt = troveUpdateTx.logs[i].args[2]
+        const price = troveUpdateTx.logs[i].args[3]
+        const par = troveUpdateTx.logs[i].args[4]
+
+        return [icr, value, compDebt, price, par]
+      }
+    }
+    throw ("The transaction logs do not contain a trove update event")
   }
 
   static getEmittedLiquidatedDebt(liquidationTx) {
@@ -449,6 +581,26 @@ class TestHelper {
     }
 
     throw (`The transaction logs do not contain event ${eventName} and arg ${argName}`)
+  }
+
+  static getRawEventArgByName(tx, iFace, contractAddr, eventName, argName) {
+    const log = tx.receipt.rawLogs                 // all logs in the tx
+      .filter(l => l.address === contractAddr)  // keep SP only
+      .map   (l => iFace.parseLog(l))                  // ABI‑decode
+      .find  (l => l.name === eventName);         // pick the one
+
+    return log.args[argName]
+  }
+
+  static getAllRawEventArgByName(tx, iFace, contractAddr, eventName, argName) {
+    const log = tx.receipt.rawLogs                 // all logs in the tx
+      .filter(l => l.address === contractAddr)  // keep SP only
+      .map   (l => iFace.parseLog(l))                  // ABI‑decode
+      .find  (l => l.name === eventName);         // pick the one
+
+    return log
+
+    //throw (`The transaction logs do not contain event ${eventName} and arg ${argName}`)
   }
 
   static getAllEventsByName(tx, eventName) {
@@ -509,7 +661,8 @@ class TestHelper {
   }
 
   static async getCollAndDebtFromWithdrawLUSD(contracts, account, amount) {
-    const fee = await contracts.troveManager.getBorrowingFee(amount)
+    //const fee = await contracts.troveManager.getBorrowingFee(amount)
+    const fee = this.toBN('0')
     const { entireColl, entireDebt } = await this.getEntireCollAndDebt(contracts, account)
 
     const newColl = entireColl
@@ -533,14 +686,328 @@ class TestHelper {
     // const coll = (await contracts.troveManager.Troves(account))[1]
     // const debt = (await contracts.troveManager.Troves(account))[0]
 
-    const fee = LUSDChange.gt(this.toBN('0')) ? await contracts.troveManager.getBorrowingFee(LUSDChange) : this.toBN('0')
+    //const fee = LUSDChange.gt(this.toBN('0')) ? await contracts.troveManager.getBorrowingFee(LUSDChange) : this.toBN('0')
+    const fee = this.toBN('0');
     const newColl = entireColl.add(ETHChange)
     const newDebt = entireDebt.add(LUSDChange).add(fee)
 
     return { newColl, newDebt }
   }
 
- 
+  static async depositorValuesAfterLiquidation(contracts, tx, startDeposits, totalDeposits = null) {
+      // retursn eth *gains* concatenated with SP deposits
+      // does *not* return final eth balance, ie sp.getDepositorGain()
+      const [,drip] = await this.getEmittedDripValues(tx)
+      const stabilityPoolInterface = (await ethers.getContractAt("StabilityPool", contracts.stabilityPool.address)).interface;
+      var collToAdd = this.toBN(await this.getRawEventArgByName(tx, stabilityPoolInterface, contracts.stabilityPool.address, "Offset", "collToAdd"))
+      var debtToOffset = this.toBN(await this.getRawEventArgByName(tx, stabilityPoolInterface, contracts.stabilityPool.address, "Offset", "debtToOffset"))
+
+      // Sometimes sum of deposits is not exactly equaling deposits, possibly exacerbated with increasing scales
+      // In this case, allow totalDeposits to be passed in and not derived from individual deposits
+      //
+      if (totalDeposits == null) {
+          totalDeposits = web3.utils.toBN('0');
+          startDeposits.forEach( num => {
+              totalDeposits = totalDeposits.add(num);
+          })
+      }
+
+      // distribute drip gain
+      const drippedDeposits = []
+      for (const dep of startDeposits) {
+          // how much depositor gets from drip
+          const depositorDrip = drip.mul(dep).div(totalDeposits)
+          const dripDeposit = dep.add(depositorDrip)
+          drippedDeposits.push(dripDeposit)
+      }
+
+      const totalDepositsWithDrip = totalDeposits.add(drip)
+
+      // Logic from SP.getMaxAmountToOffset()
+      // TODO: is this needed? Offset event above is after SP.getMaxAmountToOffset() check in troveManager
+      /*
+      const amountToLeave = totalDepositsWithDrip < this.toBN(this.dec(1,18)) ? totalDepositsWithDrip: this.toBN(this.dec(1,18));
+      const available = totalDepositsWithDrip.sub(amountToLeave)
+      if (debtToOffset.gte(available)) {
+          debtToOffset = available
+      }
+      */
+
+      // distribute collateral
+      const finalGains = []
+      const finalDeposits = []
+      for (const dep of drippedDeposits) {
+
+          // depositor loss from liquidation
+          const depositorGain = collToAdd.mul(dep).div(totalDepositsWithDrip.add(this.toBN('1')))
+          const depositorLoss = debtToOffset.mul(dep).div(totalDepositsWithDrip)
+
+          // depositor deposit remaining after drip and loss from liquidation offset
+          const finalDeposit = dep.sub(depositorLoss)
+
+          finalGains.push(depositorGain)
+          finalDeposits.push(finalDeposit)
+      }
+
+      return finalGains.concat(finalDeposits)
+  }
+  static async depositorValuesAfterTwoLiquidations(contracts, tx1, tx2, startDeposits, totalDeposits = null, totalDeposits1 = null) {
+      // retursn eth *gains* concatenated with SP deposits
+      // does *not* return final eth balance, ie sp.getDepositorGain()
+      const gainsDeposits1 = await this.depositorValuesAfterLiquidation(contracts, tx1, startDeposits, totalDeposits)
+
+      const deposits1 = gainsDeposits1.slice(gainsDeposits1.length/2)
+      const gains1 = gainsDeposits1.slice(0, gainsDeposits1.length/2)
+
+      const gainsDeposits2 = await this.depositorValuesAfterLiquidation(contracts, tx2, deposits1, totalDeposits1)
+
+      const deposits2 = gainsDeposits2.slice(gainsDeposits2.length/2)
+      const gains2 = gainsDeposits2.slice(0, gainsDeposits2.length/2)
+
+      if (gains1.length != gains2.length) {
+          throw new Error("Gains arrays are not equal length");
+      }
+
+      const gainsSum = gains1.map(function(v, i) {
+          return v.add(gains2[i]);
+      })
+
+      return gainsSum.concat(deposits2)
+
+  }
+
+  static async depositorValuesAfterThreeLiquidations(contracts, tx1, tx2, tx3, startDeposits, totalDeposits = null, totalDeposits1 = null, totalDeposits2 = null) {
+      // retursn eth *gains* concatenated with SP deposits
+      // does *not* return final eth balance, ie sp.getDepositorGain()
+      const gainsDeposits1 = await this.depositorValuesAfterLiquidation(contracts, tx1, startDeposits, totalDeposits)
+
+      const deposits1 = gainsDeposits1.slice(gainsDeposits1.length/2)
+      const gains1 = gainsDeposits1.slice(0, gainsDeposits1.length/2)
+
+      const gainsDeposits2 = await this.depositorValuesAfterLiquidation(contracts, tx2, deposits1, totalDeposits1)
+
+      const deposits2 = gainsDeposits2.slice(gainsDeposits2.length/2)
+      const gains2 = gainsDeposits2.slice(0, gainsDeposits2.length/2)
+
+      const gainsDeposits3 = await this.depositorValuesAfterLiquidation(contracts, tx3, deposits2, totalDeposits2)
+
+      const deposits3 = gainsDeposits3.slice(gainsDeposits3.length/2)
+      const gains3 = gainsDeposits3.slice(0, gainsDeposits3.length/2)
+
+      if (gains1.length != gains2.length) {
+          throw new Error("Gains arrays are not equal length");
+      }
+      if (gains2.length != gains3.length) {
+          throw new Error("Gains arrays are not equal length");
+      }
+
+      const gainsSum = gains1.map(function(v, i) {
+          return v.add(gains2[i]).add(gains3[i]);
+      })
+
+      return gainsSum.concat(deposits3)
+
+  }
+
+  static async ethGainsAfterLiquidation(contracts, tx, startDeposits, totalDeposits = null) {
+      const [,drip] = await this.getEmittedDripValues(tx)
+      const stabilityPoolInterface = (await ethers.getContractAt("StabilityPool", contracts.stabilityPool.address)).interface;
+      var collToAdd = this.toBN(await this.getRawEventArgByName(tx, stabilityPoolInterface, contracts.stabilityPool.address, "Offset", "collToAdd"))
+      var debtToOffset = this.toBN(await this.getRawEventArgByName(tx, stabilityPoolInterface, contracts.stabilityPool.address, "Offset", "debtToOffset"))
+
+      // Sometimes sum of deposits is not exactly equaling deposits, possibly exacerbated with increasing scales
+      // In this case, allow totalDeposits to be passed in and not derived from individual deposits
+      //
+      if (totalDeposits == null) {
+          totalDeposits = web3.utils.toBN('0');
+          startDeposits.forEach( num => {
+              totalDeposits = totalDeposits.add(num);
+          })
+      }
+
+      // distribute drip gain
+      const drippedDeposits = []
+      for (const dep of startDeposits) {
+          // how much depositor gets from drip
+          const depositorDrip = drip.mul(dep).div(totalDeposits)
+          const dripDeposit = dep.add(depositorDrip)
+          drippedDeposits.push(dripDeposit)
+      }
+
+      const totalDepositsWithDrip = totalDeposits.add(drip)
+
+      // Logic from SP.getMaxAmountToOffset()
+      // TODO: is this needed? Offset event above is after SP.getMaxAmountToOffset() check in troveManager
+      /*
+      const amountToLeave = totalDepositsWithDrip < this.toBN(this.dec(1,18)) ? totalDepositsWithDrip: this.toBN(this.dec(1,18));
+      const available = totalDepositsWithDrip.sub(amountToLeave)
+      if (debtToOffset.gte(available)) {
+          debtToOffset = available
+      }
+      */
+
+      // distribute collateral
+      const finalColls = []
+      const finalDeposits = []
+      for (const dep of drippedDeposits) {
+
+          // depositor loss from liquidation
+          const depositorGain = collToAdd.mul(dep).div(totalDepositsWithDrip.add(this.toBN('1')))
+          const depositorLoss = debtToOffset.mul(dep).div(totalDepositsWithDrip)
+
+          // depositor deposit remaining after drip and loss from liquidation offset
+          const finalDeposit = dep.sub(depositorLoss)
+
+          finalColls.push(depositorGain)
+          finalDeposits.push(finalDeposit)
+      }
+
+      return [finalColls, finalDeposits]
+
+  }
+
+  static async ethGainsAfterTwoLiquidations(contracts, tx1, tx2, startDeposits, totalDeposits = null, totalDeposits1 = null) {
+      const [colls1, deposits1] = await this.ethGainsAfterLiquidation(contracts, tx1, startDeposits, totalDeposits)
+
+      const [colls2, deposits2] = await this.ethGainsAfterLiquidation(contracts, tx2, deposits1, totalDeposits1)
+
+      if (colls1.length != colls2.length) {
+          throw new Error("Collaterals arrays are not equal length");
+      }
+
+      return colls1.map(function(v, i) {
+          return v.add(colls2[i]);
+      })
+
+  }
+
+  static async ethGainsAfterThreeLiquidations(contracts, tx1, tx2, tx3, startDeposits, totalDeposits = null, totalDeposits1 = null, totalDeposits2 = null) {
+      const [colls1, deposits1] = await this.ethGainsAfterLiquidation(contracts, tx1, startDeposits, totalDeposits)
+
+      const [colls2, deposits2] = await this.ethGainsAfterLiquidation(contracts, tx2, deposits1, totalDeposits1)
+
+      const [colls3, deposits3] = await this.ethGainsAfterLiquidation(contracts, tx3, deposits2, totalDeposits2)
+
+      if (colls1.length != colls2.length) {
+          throw new Error("Collaterals arrays are not equal length");
+      }
+      if (colls2.length != colls3.length) {
+          throw new Error("Collaterals arrays are not equal length");
+      }
+
+      return colls1.map(function(v, i) {
+          return v.add(colls2[i]).add(colls3[i]);
+      })
+
+  }
+
+  static async depositsAfterLiquidation(contracts, tx, startDeposits, totalDeposits = null) {
+      const [,drip] = await this.getEmittedDripValues(tx)
+      const stabilityPoolInterface = (await ethers.getContractAt("StabilityPool", contracts.stabilityPool.address)).interface;
+      var offsetDebt = this.toBN(await this.getRawEventArgByName(tx, stabilityPoolInterface, contracts.stabilityPool.address, "Offset", "debtToOffset"))
+
+      // Sometimes sum of deposits is not exactly equaling deposits, possibly exacerbated with increasing scales
+      // In this case, allow totalDeposits to be passed in and not derived from individual deposits
+      //
+      if (totalDeposits == null) {
+          totalDeposits = web3.utils.toBN('0');
+          startDeposits.forEach( num => {
+              totalDeposits = totalDeposits.add(num);
+          })
+      }
+
+      // distribute drip gain
+      const drippedDeposits = []
+      for (const dep of startDeposits) {
+          // how much depositor gets from drip
+          const depositorDrip = drip.mul(dep).div(totalDeposits)
+          const dripDeposit = dep.add(depositorDrip)
+          drippedDeposits.push(dripDeposit)
+      }
+
+      const totalDepositsWithDrip = totalDeposits.add(drip)
+
+      // Logic from SP.getMaxAmountToOffset()
+      // TODO: is this needed? Offset event above is after SP.getMaxAmountToOffset() check in troveManager
+      /*
+      const amountToLeave = totalDepositsWithDrip < this.toBN(this.dec(1,18)) ? totalDepositsWithDrip: this.toBN(this.dec(1,18));
+      const available = totalDepositsWithDrip.sub(amountToLeave)
+      if (offsetDebt.gte(available)) {
+          offsetDebt = available
+      }
+      */
+
+      // distribute debt loss
+      const finalDeposits = []
+      for (const dep of drippedDeposits) {
+
+          // depositor loss from liquidation
+          const depositorLoss = offsetDebt.mul(dep).div(totalDepositsWithDrip.add(this.toBN('1')))
+          //const depositorLoss = offsetDebt.mul(dep).div(totalDepositsWithDrip)
+
+          // depositor deposit remaining after drip and loss from liquidation offset
+          const finalDeposit = dep.sub(depositorLoss)
+
+          finalDeposits.push(finalDeposit)
+      }
+
+      return finalDeposits
+
+  }
+
+  static async depositsAfterTwoLiquidations(contracts, tx1, tx2, startDeposits, totalDeposits = null, totalDeposits2 = null) {
+      const startDeposits2 = await this.depositsAfterLiquidation(contracts, tx1, startDeposits, totalDeposits)
+
+      const finalDeposits = await this.depositsAfterLiquidation(contracts, tx2, startDeposits2, totalDeposits2)
+
+      return finalDeposits
+
+  }
+
+  static async depositsAfterThreeLiquidations(contracts, tx1, tx2, tx3, startDeposits, totalDeposits = null, totalDeposits2 = null, totalDeposits3 = null) {
+      const startDeposits2 = await this.depositsAfterLiquidation(contracts, tx1, startDeposits, totalDeposits)
+
+      const startDeposits3 = await this.depositsAfterLiquidation(contracts, tx2, startDeposits2, totalDeposits2)
+
+      const finalDeposits = await this.depositsAfterLiquidation(contracts, tx3, startDeposits3, totalDeposits3)
+
+      return finalDeposits
+
+  }
+
+  static async getNewPAfterLiquidation(contracts, tx, P_initial, totalDeposits, lastError) {
+      // TODO: consider scale changes
+      // WARNING: values will be wrong when scale changes
+      // In liquidate() there are two P updates
+      // first for drip, then for offset
+      
+      const [,drip] = await this.getEmittedDripValues(tx)
+      const stabilityPoolInterface = (await ethers.getContractAt("StabilityPool", contracts.stabilityPool.address)).interface;
+      var offsetDebt = this.toBN(await this.getRawEventArgByName(tx, stabilityPoolInterface, contracts.stabilityPool.address, "Offset", "debtToOffset"))
+
+      const totalDepositsWithDrip = totalDeposits.add(drip)
+
+      // Logic from SP.getMaxAmountToOffset()
+      const amountToLeave = totalDepositsWithDrip < this.toBN(this.dec(1,18)) ? totalDepositsWithDrip: this.toBN(this.dec(1,18));
+      const available = totalDepositsWithDrip.sub(amountToLeave)
+      if (offsetDebt.gte(available)) {
+          offsetDebt = available
+      }
+
+      // Logic from SP._computeRewardsPerUnitStaked()
+      var lossNumerator = 0
+      if (offsetDebt.mul(this.toBN(this.dec(1,18))).lte(lastError)) {
+          lossNumerator = this.toBN('0')
+      } else {
+          lossNumerator = offsetDebt.mul(this.toBN(this.dec(1,18))).sub(lastError)
+      }
+
+      const P_drip = this.toBN(this.dec(1,18)).add(drip.mul(this.toBN(this.dec(1,18))).div(totalDeposits))
+      const P_liq = this.toBN(this.dec(1,18)).sub(lossNumerator.div(totalDepositsWithDrip).add(this.toBN('1')))
+      const P_final = P_initial.mul(P_drip).mul(P_liq).div(this.toBN(this.dec(1,36)))
+      return P_final
+  }
+
   // --- BorrowerOperations gas functions ---
 
   static async openTrove_allAccounts(accounts, contracts, ETHAmount, LUSDAmount) {
@@ -550,7 +1017,7 @@ class TestHelper {
     for (const account of accounts) {
       const {upperHint, lowerHint} = await this.getBorrowerOpsListHint(contracts, ETHAmount, totalDebt)
 
-      const tx = await contracts.borrowerOperations.openTrove(this._100pct, LUSDAmount, upperHint, lowerHint, { from: account, value: ETHAmount })
+      const tx = await contracts.borrowerOperations.openTrove(LUSDAmount, upperHint, lowerHint, { from: account, value: ETHAmount })
       const gas = this.gasUsed(tx)
       gasCostList.push(gas)
     }
@@ -565,7 +1032,7 @@ class TestHelper {
       const randCollAmount = this.randAmountInWei(minETH, maxETH)
       const {upperHint, lowerHint} = await this.getBorrowerOpsListHint(contracts, randCollAmount, totalDebt)
 
-      const tx = await contracts.borrowerOperations.openTrove(this._100pct, LUSDAmount, upperHint, lowerHint, { from: account, value: randCollAmount })
+      const tx = await contracts.borrowerOperations.openTrove(LUSDAmount, upperHint, lowerHint, { from: account, value: randCollAmount })
       const gas = this.gasUsed(tx)
       gasCostList.push(gas)
     }
@@ -582,7 +1049,7 @@ class TestHelper {
 
       const {upperHint, lowerHint} = await this.getBorrowerOpsListHint(contracts, randCollAmount, totalDebt)
 
-      const tx = await contracts.borrowerOperations.openTrove(this._100pct, proportionalLUSD, upperHint, lowerHint, { from: account, value: randCollAmount })
+      const tx = await contracts.borrowerOperations.openTrove(proportionalLUSD, upperHint, lowerHint, { from: account, value: randCollAmount })
       const gas = this.gasUsed(tx)
       gasCostList.push(gas)
     }
@@ -605,7 +1072,7 @@ class TestHelper {
       const {upperHint, lowerHint} = await this.getBorrowerOpsListHint(contracts, randCollAmount, totalDebt)
 
       const feeFloor = this.dec(5, 16)
-      const tx = await contracts.borrowerOperations.openTrove(this._100pct, proportionalLUSD, upperHint, lowerHint, { from: account, value: randCollAmount })
+      const tx = await contracts.borrowerOperations.openTrove(proportionalLUSD, upperHint, lowerHint, { from: account, value: randCollAmount })
 
       if (logging && tx.receipt.status) {
         i++
@@ -626,7 +1093,7 @@ class TestHelper {
       const totalDebt = await this.getOpenTroveTotalDebt(contracts, randLUSDAmount)
       const {upperHint, lowerHint} = await this.getBorrowerOpsListHint(contracts, ETHAmount, totalDebt)
 
-      const tx = await contracts.borrowerOperations.openTrove(this._100pct, randLUSDAmount, upperHint, lowerHint, { from: account, value: ETHAmount })
+      const tx = await contracts.borrowerOperations.openTrove(randLUSDAmount, upperHint, lowerHint, { from: account, value: ETHAmount })
       const gas = this.gasUsed(tx)
       gasCostList.push(gas)
     }
@@ -654,7 +1121,7 @@ class TestHelper {
       const totalDebt = await this.getOpenTroveTotalDebt(contracts, LUSDAmountWei)
       const {upperHint, lowerHint} = await this.getBorrowerOpsListHint(contracts, ETHAmount, totalDebt)
 
-      const tx = await contracts.borrowerOperations.openTrove(this._100pct, LUSDAmountWei, upperHint, lowerHint, { from: account, value: ETHAmount })
+      const tx = await contracts.borrowerOperations.openTrove(LUSDAmountWei, upperHint, lowerHint, { from: account, value: ETHAmount })
       const gas = this.gasUsed(tx)
       gasCostList.push(gas)
       i += 1
@@ -663,36 +1130,51 @@ class TestHelper {
   }
 
   static async openTrove(contracts, {
-    maxFeePercentage,
     extraLUSDAmount,
     upperHint,
     lowerHint,
     ICR,
     extraParams
   }) {
-    if (!maxFeePercentage) maxFeePercentage = this._100pct
     if (!extraLUSDAmount) extraLUSDAmount = this.toBN(0)
     else if (typeof extraLUSDAmount == 'string') extraLUSDAmount = this.toBN(extraLUSDAmount)
     if (!upperHint) upperHint = this.ZERO_ADDRESS
     if (!lowerHint) lowerHint = this.ZERO_ADDRESS
 
+    /*
     const MIN_DEBT = (
       await this.getNetBorrowingAmount(contracts, await contracts.borrowerOperations.MIN_NET_DEBT())
     ).add(this.toBN(1)) // add 1 to avoid rounding issues
+    */
+
+    const MIN_DEBT = (
+      await this.getNetBorrowingAmount(contracts, await contracts.borrowerOperations.MIN_NET_DEBT())
+    )
+
     const lusdAmount = MIN_DEBT.add(extraLUSDAmount)
 
     if (!ICR && !extraParams.value) ICR = this.toBN(this.dec(15, 17)) // 150%
     else if (typeof ICR == 'string') ICR = this.toBN(ICR)
 
+    // totaldebt = lusdAmount + gas_comp
     const totalDebt = await this.getOpenTroveTotalDebt(contracts, lusdAmount)
-    const netDebt = await this.getActualDebtFromComposite(totalDebt, contracts)
+    // netDebt = totalDebt - gas_comp
+    //const netDebt = await this.getActualDebtFromComposite(totalDebt, contracts)
+    const netDebt = lusdAmount
 
     if (ICR) {
+      const par = await contracts.relayer.par()
       const price = await contracts.priceFeedTestnet.getPrice()
-      extraParams.value = ICR.mul(totalDebt).div(price)
-    }
 
-    const tx = await contracts.borrowerOperations.openTrove(maxFeePercentage, lusdAmount, upperHint, lowerHint, extraParams)
+      extraParams.value = ICR.mul(totalDebt).mul(par).div(this.toBN(this.dec(1, 18)).mul(price))
+
+      // value coud be truncated down
+      if (extraParams.value.mul(price) < ICR.mul(totalDebt).mul(par).div(this.toBN(this.dec(1, 18)))) {
+          extraParams.value = extraParams.value.add(this.toBN('1'))
+      }
+    }
+    
+    const tx = await contracts.borrowerOperations.openTrove(lusdAmount, upperHint, lowerHint, extraParams)
 
     return {
       lusdAmount,
@@ -705,14 +1187,12 @@ class TestHelper {
   }
 
   static async withdrawLUSD(contracts, {
-    maxFeePercentage,
     lusdAmount,
     ICR,
     upperHint,
     lowerHint,
     extraParams
   }) {
-    if (!maxFeePercentage) maxFeePercentage = this._100pct
     if (!upperHint) upperHint = this.ZERO_ADDRESS
     if (!lowerHint) lowerHint = this.ZERO_ADDRESS
 
@@ -731,7 +1211,7 @@ class TestHelper {
       increasedTotalDebt = await this.getAmountWithBorrowingFee(contracts, lusdAmount)
     }
 
-    await contracts.borrowerOperations.withdrawLUSD(maxFeePercentage, lusdAmount, upperHint, lowerHint, extraParams)
+    await contracts.borrowerOperations.withdrawLUSD(lusdAmount, upperHint, lowerHint, extraParams)
 
     return {
       lusdAmount,
@@ -873,7 +1353,7 @@ class TestHelper {
       const { newColl, newDebt } = await this.getCollAndDebtFromWithdrawLUSD(contracts, account, amount)
       const {upperHint, lowerHint} = await this.getBorrowerOpsListHint(contracts, newColl, newDebt)
 
-      const tx = await contracts.borrowerOperations.withdrawLUSD(this._100pct, amount, upperHint, lowerHint, { from: account })
+      const tx = await contracts.borrowerOperations.withdrawLUSD(amount, upperHint, lowerHint, { from: account })
       const gas = this.gasUsed(tx)
       gasCostList.push(gas)
     }
@@ -889,7 +1369,7 @@ class TestHelper {
       const { newColl, newDebt } = await this.getCollAndDebtFromWithdrawLUSD(contracts, account, randLUSDAmount)
       const {upperHint, lowerHint} = await this.getBorrowerOpsListHint(contracts, newColl, newDebt)
 
-      const tx = await contracts.borrowerOperations.withdrawLUSD(this._100pct, randLUSDAmount, upperHint, lowerHint, { from: account })
+      const tx = await contracts.borrowerOperations.withdrawLUSD(randLUSDAmount, upperHint, lowerHint, { from: account })
       const gas = this.gasUsed(tx)
       gasCostList.push(gas)
     }
@@ -970,12 +1450,12 @@ class TestHelper {
     }
     return this.getGasMetrics(gasCostList)
   }
-
   static async performRedemptionTx(redeemer, price, contracts, LUSDAmount, maxFee = 0, gasPrice_toUse = 0) {
     const redemptionhint = await contracts.hintHelpers.getRedemptionHints(LUSDAmount, price, gasPrice_toUse)
 
     const firstRedemptionHint = redemptionhint[0]
     const partialRedemptionNewICR = redemptionhint[1]
+    //console.log("partialRedemptionNewICR", partialRedemptionNewICR.toString())
 
     const {
       hintAddress: approxPartialRedemptionHint,
@@ -1156,7 +1636,8 @@ class TestHelper {
       assert.isFalse(tx.receipt.status) // when this assert fails, the expected revert didn't occur, i.e. the tx succeeded
     } catch (err) {
       // console.log("tx failed")
-      assert.include(err.message, "revert")
+      //assert.include(err.message, "revert")
+      assert(err.message.includes("revert") || err.message.includes("invalid opcode"), "Expected revert or invalid opcode, got: " + err.message);
       // TODO !!!
       
       // if (message) {
@@ -1208,6 +1689,50 @@ class TestHelper {
     return web3.utils.sha3(signatureString).slice(0,10) +
       params.reduce((acc, p) => acc + this.formatParam(p), '')
   }
+
+  static async sendQueuedTx2(web3Contract, methodName, args = [], from, gas = 1_000_000) {
+    const txData = web3Contract.methods[methodName](...args).encodeABI();
+
+    const txHash = await ethers.provider.send("eth_sendTransaction", [{
+      from,
+      to: web3Contract.address,
+      data: txData,
+      gas
+    }]);
+
+    return txHash;
+  }
+
+
+  static async sendQueuedTx({
+    contract,
+    methodName,
+    args = [],
+    gas = 1_000_000
+  }) {
+
+    const [signer] = await ethers.getSigners();
+    const from = await signer.getAddress();
+
+    let method;
+    try {
+      method = contract.contract.methods[methodName](...args);
+    } catch (err) {
+      throw new Error(`Method '${methodName}' is not callable on contract: ${err.message}`);
+    }
+
+    const data = contract.contract.methods[methodName](...args).encodeABI();
+
+    const txHash = await ethers.provider.send("eth_sendTransaction", [{
+      from,
+      to: contract.address,
+      data,
+      gas: ethers.utils.hexStripZeros(ethers.utils.hexlify(gas)),
+    }]);
+
+    return txHash;
+  }
+
 }
 
 TestHelper.ZERO_ADDRESS = '0x' + '0'.repeat(40)

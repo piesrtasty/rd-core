@@ -7,6 +7,7 @@ import "./Interfaces/ISortedTroves.sol";
 import "./Dependencies/LiquityBase.sol";
 import "./Dependencies/Ownable.sol";
 import "./Dependencies/CheckContract.sol";
+import "./Dependencies/console.sol";
 
 contract HintHelpers is LiquityBase, Ownable, CheckContract {
     string constant public NAME = "HintHelpers";
@@ -18,24 +19,29 @@ contract HintHelpers is LiquityBase, Ownable, CheckContract {
 
     event SortedTrovesAddressChanged(address _sortedTrovesAddress);
     event TroveManagerAddressChanged(address _troveManagerAddress);
+    event RelayerAddressChanged(address _relayerAddress);
 
     // --- Dependency setters ---
 
     function setAddresses(
         address _sortedTrovesAddress,
-        address _troveManagerAddress
+        address _troveManagerAddress,
+        address _relayerAddress
     )
         external
         onlyOwner
     {
         checkContract(_sortedTrovesAddress);
         checkContract(_troveManagerAddress);
+        checkContract(_relayerAddress);
 
         sortedTroves = ISortedTroves(_sortedTrovesAddress);
         troveManager = ITroveManager(_troveManagerAddress);
+        relayer = IRelayer(_relayerAddress);
 
         emit SortedTrovesAddressChanged(_sortedTrovesAddress);
         emit TroveManagerAddressChanged(_troveManagerAddress);
+        emit RelayerAddressChanged(_relayerAddress);
 
         _renounceOwnership();
     }
@@ -74,6 +80,7 @@ contract HintHelpers is LiquityBase, Ownable, CheckContract {
     {
         ISortedTroves sortedTrovesCached = sortedTroves;
 
+        uint par = relayer.par();
         uint remainingLUSD = _LUSDamount;
         address currentTroveuser = sortedTrovesCached.getLast();
 
@@ -88,8 +95,13 @@ contract HintHelpers is LiquityBase, Ownable, CheckContract {
         }
 
         while (currentTroveuser != address(0) && remainingLUSD > 0 && _maxIterations-- > 0) {
-            uint netLUSDDebt = _getNetDebt(troveManager.getTroveDebt(currentTroveuser))
-                .add(troveManager.getPendingLUSDDebtReward(currentTroveuser));
+            // norm
+            //uint netLUSDDebt = _getNetDebt(troveManager.getTroveDebt(currentTroveuser))
+            //    .add(troveManager.getPendingLUSDDebtReward(currentTroveuser));
+
+            // actual
+            uint netLUSDDebt = _getNetDebt(troveManager.getTroveActualDebt(currentTroveuser))
+                .add(troveManager.getPendingActualLUSDDebtReward(currentTroveuser));
 
             if (netLUSDDebt > remainingLUSD) {
                 if (netLUSDDebt > MIN_NET_DEBT) {
@@ -98,11 +110,15 @@ contract HintHelpers is LiquityBase, Ownable, CheckContract {
                     uint ETH = troveManager.getTroveColl(currentTroveuser)
                         .add(troveManager.getPendingETHReward(currentTroveuser));
 
-                    uint newColl = ETH.sub(maxRedeemableLUSD.mul(DECIMAL_PRECISION).div(_price));
+                    uint newColl = ETH.sub(maxRedeemableLUSD.mul(par).div(_price));
                     uint newDebt = netLUSDDebt.sub(maxRedeemableLUSD);
 
                     uint compositeDebt = _getCompositeDebt(newDebt);
-                    partialRedemptionHintNICR = LiquityMath._computeNominalCR(newColl, compositeDebt);
+
+                    uint256 nCompositeDebt = _normalizedDebt(compositeDebt, troveManager.accumulatedRate());
+
+                    //partialRedemptionHintNICR = LiquityMath._computeNominalCR(newColl, compositeDebt);
+                    partialRedemptionHintNICR = LiquityMath._computeNominalCR(newColl, nCompositeDebt);
 
                     remainingLUSD = remainingLUSD.sub(maxRedeemableLUSD);
                 }
@@ -165,7 +181,8 @@ contract HintHelpers is LiquityBase, Ownable, CheckContract {
         return LiquityMath._computeNominalCR(_coll, _debt);
     }
 
-    function computeCR(uint _coll, uint _debt, uint _price) external pure returns (uint) {
-        return LiquityMath._computeCR(_coll, _debt, _price);
+    function computeCR(uint _coll, uint _debt, uint _price) external view returns (uint) {
+        uint par = relayer.par();
+        return LiquityMath._computeCR(_coll, _debt, _price, par);
     }
 }

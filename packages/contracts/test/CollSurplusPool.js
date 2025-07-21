@@ -60,7 +60,7 @@ contract('CollSurplusPool', async accounts => {
     await th.fastForwardTime(timeValues.SECONDS_IN_ONE_WEEK * 2, web3.currentProvider)
 
     // At ETH:USD = 100, this redemption should leave 1 ether of coll surplus
-    await th.redeemCollateralAndGetTxObject(A, contracts, B_netDebt)
+    await th.redeemCollateralAndGetTxObject(A, contracts, B_netDebt, gasPrice=5)
 
     const ETH_2 = await collSurplusPool.getETH()
     th.assertIsApproximatelyEqual(ETH_2, B_coll.sub(B_netDebt.mul(mv._1e18BN).div(price)))
@@ -84,7 +84,8 @@ contract('CollSurplusPool', async accounts => {
     const B_coll = toBN(dec(60, 18))
     const B_lusdAmount = toBN(dec(3000, 18))
     const B_netDebt = await th.getAmountWithBorrowingFee(contracts, B_lusdAmount)
-    const openTroveData = th.getTransactionData('openTrove(uint256,uint256,address,address)', ['0xde0b6b3a7640000', web3.utils.toHex(B_lusdAmount), B, B])
+    //const openTroveData = th.getTransactionData('openTrove(uint256,uint256,address,address)', ['0xde0b6b3a7640000', web3.utils.toHex(B_lusdAmount), B, B])
+    const openTroveData = th.getTransactionData('openTrove(uint256,address,address)', [web3.utils.toHex(B_lusdAmount), B, B])
     await nonPayable.forward(borrowerOperations.address, openTroveData, { value: B_coll })
     await openTrove({ extraLUSDAmount: B_netDebt, extraParams: { from: A, value: dec(3000, 'ether') } })
 

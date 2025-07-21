@@ -174,7 +174,7 @@ contract LQTYStaking is ILQTYStaking, Ownable, CheckContract, BaseMath {
     }
 
     function increaseF_LUSD(uint _LUSDFee) external override {
-        _requireCallerIsBorrowerOperations();
+        _requireCallerIsBorrowerOperationsOrTroveManager();
         uint LUSDFeePerLQTYStaked;
         
         if (totalLQTYStaked > 0) {LUSDFeePerLQTYStaked = _LUSDFee.mul(DECIMAL_PRECISION).div(totalLQTYStaked);}
@@ -227,6 +227,11 @@ contract LQTYStaking is ILQTYStaking, Ownable, CheckContract, BaseMath {
 
     function _requireCallerIsBorrowerOperations() internal view {
         require(msg.sender == borrowerOperationsAddress, "LQTYStaking: caller is not BorrowerOps");
+    }
+
+    function _requireCallerIsBorrowerOperationsOrTroveManager() internal view {
+        require(msg.sender == borrowerOperationsAddress ||
+                msg.sender == troveManagerAddress, "LQTYStaking: caller is not BorrowerOps or TroveManager");
     }
 
      function _requireCallerIsActivePool() internal view {
