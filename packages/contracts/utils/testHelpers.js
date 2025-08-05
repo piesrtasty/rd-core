@@ -193,9 +193,18 @@ class TestHelper {
     return gas
   }
 
+  static ethUsed(tx) {
+    const gas = this.toBN(tx.receipt.gasUsed)
+    const gasPrice = this.toBN(tx.receipt.effectiveGasPrice)
+
+    return gas.mul(gasPrice)
+  }
+
   static applyLiquidationFee(ethAmount) {
+    // just the gas compensation fee, not the penalty
     return ethAmount.mul(this.toBN(this.dec(995, 15))).div(MoneyValues._1e18BN)
   }
+
   // --- Logging functions ---
 
   static logGasMetrics(gasResults, message) {
@@ -422,6 +431,19 @@ class TestHelper {
     throw ("The transaction logs do not contain a drip event")
   }
 
+  static getEmittedEtherSentValues(tx) {
+    for (let i = 0; i < tx.logs.length; i++) {
+      if (tx.logs[i].event === "EtherSent") {
+
+        const to = tx.logs[i].args[0]
+        const amount = tx.logs[i].args[1]
+
+        return [to, amount]
+      }
+    }
+    throw ("The transaction logs do not contain an EtherSent event")
+  }
+
   static getEmittedParUpdateValues(updateTx) {
     for (let i = 0; i < updateTx.logs.length; i++) {
       if (updateTx.logs[i].event === "ParUpdated") {
@@ -464,6 +486,32 @@ class TestHelper {
       }
     }
     throw ("The transaction logs do not contain a liquidation event")
+  }
+
+  static getMultipleEmittedLiquidationValues(tx, n) {
+    const debts = []
+    const colls = []
+    const gasComps = []
+    const lusdComps = []
+    for (let i = 0; i < tx.logs.length; i++) {
+      if (tx.logs[i].event === "Liquidation") {
+        const liquidatedDebt = tx.logs[i].args[0]
+        const liquidatedColl = tx.logs[i].args[1]
+        const collGasComp = tx.logs[i].args[2]
+        const lusdGasComp = tx.logs[i].args[3]
+
+        debts.push(liquidatedDebt)
+        colls.push(liquidatedColl)
+        gasComps.push(collGasComp)
+        lusdComps.push(lusdGasComp )
+      }
+    }
+
+    console.log("len", debts.length) 
+    if (debts.length != 3) {
+      throw (`The transaction logs do not contain ${n} liquidation events`)
+    }
+    return debt.concat(colls).concat(gasComps).concat(lusdComps)
   }
 
   static getEmittedPUpdated(pUpdatedTx) {

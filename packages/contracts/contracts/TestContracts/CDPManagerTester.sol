@@ -22,14 +22,16 @@ contract TroveManagerTester is TroveManager {
         return LUSD_GAS_COMPENSATION;
     }
 
-    /*
-    function baseRate() external view returns (uint) {
-        return aggregator.baseRate();
-    }
-    */
-
     function getCompositeDebt(uint _debt) external pure returns (uint) {
         return _getCompositeDebt(_debt);
+    }
+
+    function setLiqPenalty(uint _liqPenalty) external {
+        LIQUIDATION_PENALTY = _liqPenalty;
+    }
+
+    function setLiqPenaltyRedist(uint _liqPenaltyRedist) external {
+        LIQUIDATION_PENALTY_REDIST = _liqPenaltyRedist;
     }
 
     function getActualDebtFromComposite(uint _debtVal) external pure returns (uint) {

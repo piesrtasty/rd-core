@@ -41,6 +41,8 @@ interface ITroveManager is ILiquityBase {
     event TroveSnapshotsUpdated(uint _L_ETH, uint _L_LUSDDebt);
     event TroveIndexUpdated(address _borrower, uint _newIndex);
 
+    event AccInterestRateUpdated(uint256 rate);
+
     // --- Functions ---
 
     function setAddresses(

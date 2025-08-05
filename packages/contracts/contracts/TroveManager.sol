@@ -14,10 +14,11 @@ import "./Interfaces/IRelayer.sol";
 import "./Dependencies/LiquityBase.sol";
 import "./Dependencies/Ownable.sol";
 import "./Dependencies/CheckContract.sol";
+//import "./LiquidationMath.sol";
 //import "./Dependencies/console.sol";
 
 contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
-    string constant public NAME = "TroveManager";
+    //string constant public NAME = "TroveManager";
 
     // --- Connected contract declarations ---
 
@@ -44,20 +45,38 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
 
     // --- Data structures ---
 
-    uint constant public SECONDS_IN_ONE_MINUTE = 60;
+    uint internal constant SECONDS_IN_ONE_MINUTE = 60;
+    /*
+     * Half-life of 12h. 12h = 720 min
+     * (1/2) = d^720 => d = (1/2)^(1/720)
+     */
+    uint internal constant MINUTE_DECAY_FACTOR = 999037758833783000;
     uint constant public REDEMPTION_FEE_FLOOR = DECIMAL_PRECISION / 1000 * 5; // 0.5%
 
-    uint constant public DRIP_STALENESS_THRESHOLD = 1 hours;
+    uint internal constant DRIP_STALENESS_THRESHOLD = 1 hours;
 
     // During bootsrap period redemptions are not allowed
-    uint constant public BOOTSTRAP_PERIOD = 14 days;
+    uint internal constant BOOTSTRAP_PERIOD = 14 days;
+
+    /*
+    * BETA: 18 digit decimal. Parameter by which to divide the redeemed fraction, in order to calc the new base rate from a redemption.
+    * Corresponds to (1 / ALPHA) in the white paper.
+    */
+    uint internal constant BETA = 2;
 
     uint public override accumulatedRate = RATE_PRECISION; // accumulated interest rate
     uint public lastAccRateUpdateTime = block.timestamp;
     uint public stakeRevenueAllocation = 25*10**16; // 25%
+    uint public baseRate;
 
-    uint256 constant MAX_PAR_STALENESS = 60;
-    uint256 constant MAX_RATE_STALENESS = 300;
+    // max percent of debt value taken in collateral from a liquidated trove when offsetting from SP
+    uint public LIQUIDATION_PENALTY = 105 * 10**16; //5%
+
+    // max percent of debt value taken in collateral from a liquidated trove when redistributing debt
+    uint public LIQUIDATION_PENALTY_REDIST = 110 * 10**16;
+
+    // The timestamp of the latest fee operation (redemption only)
+    uint public lastFeeOperationTime;
 
     enum Status {
         nonExistent,
@@ -170,6 +189,18 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
         uint totalCollSurplus;
     }
 
+    struct LiquidationOffsetInputs {
+        uint entireTroveDebt;
+        uint actualTroveDebt;
+        uint coll;
+        uint LUSDInSPForOffsets;
+        uint price;
+        uint par;
+        uint accumulatedRate;
+        uint liqPenalty;
+        uint liqPenaltyRedist;
+    }
+
     struct ContractsCache {
         IActivePool activePool;
         IDefaultPool defaultPool;
@@ -202,7 +233,9 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
     // --- Events ---
     event TroveUpdated(address indexed _borrower, uint _debt, uint _coll, uint _stake, TroveManagerOperation _operation);
     event TroveLiquidated(address indexed _borrower, uint _debt, uint _coll, TroveManagerOperation _operation);
+    /*
     event AccInterestRateUpdated(uint256 rate);
+    */
     //event Offset(uint256 _debtToOffset, uint256 _nDebtToOffset, uint256 _debtInSequence, uint256 _totalLUSD);
     //event PreDrip(uint256 _systemDebt, uint256 _supply);
     //event PostDrip(uint256 _existingSystemDebt, uint256 _existingSupply, uint256 _existingRate,
@@ -210,10 +243,12 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
     //event Drip(uint256 _newInterest, uint256 _newDebt, uint256 _currentSupply);
     event Drip(uint256 _stakeInterest, uint256 _spInterest);
 
-
+    /*
     event TroveLiqInfo(uint256 entireColl, uint256 normDebt, uint256 collToLiquidate, uint256 collToSp, uint256 collToRedistribute,
-                       uint256 actualDebt, uint256 totalActualLUSD, uint256 totalNormLUSD);
-    event PartialNicr(address borrower, uint256 newNicr, uint256 newActualDebt);
+                       uint256 actualDebt, uint256 totalNormLUSD);
+    */
+
+    //event PartialNicr(address borrower, uint256 newNicr, uint256 newActualDebt);
 
      enum TroveManagerOperation {
         applyPendingRewards,
@@ -314,19 +349,109 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
 
     // --- Inner single liquidation functions ---
 
-    // Liquidate one trove
+    function _maxPenaltyColl
+    (
+        uint _actualDebtToOffset,
+        uint _par,
+        uint _liqPenalty,
+        uint _price
+    ) internal pure returns (uint) {
+        return _actualDebtToOffset
+               .mul(_par)
+               .mul(_liqPenalty)
+               .div(_price)
+               .div(DECIMAL_PRECISION);
+    }
+    /*
+    function getCappedOffsetAndRedistributionVals(LiquidationOffsetInputs memory _inputs)
+        internal
+        pure
+        returns (uint debtToOffset, uint collToSendToSP, uint debtToRedistribute, uint collToRedistribute, uint collSurplus)
+    {
+
+        // Can offset from SP first
+        if (_inputs.LUSDInSPForOffsets > 0) {
+            debtToOffset = LiquityMath._min(_inputs.entireTroveDebt, _inputs.LUSDInSPForOffsets); // norm
+            //uint actualDebtToOffset = _actualDebt(debtToOffset);
+            uint actualDebtToOffset = debtToOffset.mul(_inputs.accumulatedRate).div(RATE_PRECISION);
+            collToSendToSP = _inputs.coll.mul(debtToOffset).div(_inputs.entireTroveDebt);
+
+            uint maxCollToSendToSP = _maxPenaltyColl(actualDebtToOffset, _inputs.par, _inputs.liqPenalty, _inputs.price);
+            if (maxCollToSendToSP < collToSendToSP) collToSendToSP = maxCollToSendToSP;
+
+            // If debt is leftover after SP offset, redistribute with redist penalty 
+            if (actualDebtToOffset  < _inputs.actualTroveDebt) {
+                collToRedistribute = _maxPenaltyColl(_inputs.actualTroveDebt - actualDebtToOffset, _inputs.par,
+                                                     _inputs.liqPenaltyRedist, _inputs.price);
+
+                if (collToRedistribute > _inputs.coll - collToSendToSP) collToRedistribute = _inputs.coll - collToSendToSP;
+
+                debtToRedistribute = _inputs.entireTroveDebt - debtToOffset; //norm
+
+            // No debt leftover after SP offset
+            } else {
+                debtToRedistribute = 0;
+                collToRedistribute = 0;
+            }
+
+        // No RD available in SP.  Redistribute all debt and collateral
+        } else {
+            debtToOffset = 0;
+            collToSendToSP = 0;
+            debtToRedistribute = _inputs.entireTroveDebt;
+
+            collToRedistribute = _maxPenaltyColl(_inputs.actualTroveDebt, _inputs.par,
+                                                     _inputs.liqPenaltyRedist, _inputs.price);
+
+            if (collToRedistribute > _inputs.coll) collToRedistribute = _inputs.coll;
+        }
+
+        collSurplus = _inputs.coll - collToSendToSP - collToRedistribute;
+    }
+    */
+    function getCappedOffsetAndRedistributionVals(LiquidationOffsetInputs memory i)
+        internal
+        pure
+        returns (uint debtToOffset, uint collToSendToSP, uint debtToRedistribute, uint collToRedistribute, uint collSurplus)
+    {
+        if (i.LUSDInSPForOffsets > 0) {
+            debtToOffset = LiquityMath._min(i.entireTroveDebt, i.LUSDInSPForOffsets);
+            uint actualDebtToOffset = debtToOffset.mul(i.accumulatedRate) / RATE_PRECISION;
+            collToSendToSP = i.coll.mul(debtToOffset) / i.entireTroveDebt;
+
+            uint maxToSP = _maxPenaltyColl(actualDebtToOffset, i.par, i.liqPenalty, i.price);
+            if (collToSendToSP > maxToSP) collToSendToSP = maxToSP;
+
+            if (actualDebtToOffset < i.actualTroveDebt) {
+                uint remDebt = i.actualTroveDebt - actualDebtToOffset;
+                collToRedistribute = _maxPenaltyColl(remDebt, i.par, i.liqPenaltyRedist, i.price);
+                uint remColl = i.coll - collToSendToSP;
+                if (collToRedistribute > remColl) collToRedistribute = remColl;
+                debtToRedistribute = i.entireTroveDebt - debtToOffset;
+            }
+        } else {
+            debtToRedistribute = i.entireTroveDebt;
+            collToRedistribute = _maxPenaltyColl(i.actualTroveDebt, i.par, i.liqPenaltyRedist, i.price);
+            if (collToRedistribute > i.coll) collToRedistribute = i.coll;
+        }
+
+        collSurplus = i.coll - collToSendToSP - collToRedistribute;
+    }
     function _liquidate(
         IActivePool _activePool,
         IDefaultPool _defaultPool,
         address _borrower,
-        uint _LUSDInSPForOffsets //norm_getOffsetAndRedistributionVals
+        uint _LUSDInSPForOffsets, //norm
+        uint _price,
+        uint _par,
+        uint _accumulatedRate
     )
         internal
         returns (LiquidationValues memory singleLiquidation)
     {
         LocalVariables_InnerSingleLiquidateFunction memory vars;
-        if (TroveOwners.length <= 1) {return singleLiquidation;} // don't liquidate if last trove
 
+        if (TroveOwners.length <= 1) {return singleLiquidation;} // don't liquidate if last trove
         
         (singleLiquidation.entireTroveDebt, //normalized
         singleLiquidation.entireTroveColl,
@@ -340,62 +465,42 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
 
         singleLiquidation.collGasCompensation = _getCollGasCompensation(singleLiquidation.entireTroveColl);
         singleLiquidation.LUSDGasCompensation = LUSD_GAS_COMPENSATION;
-        uint collToLiquidate = singleLiquidation.entireTroveColl.sub(singleLiquidation.collGasCompensation);
+
+        LiquidationOffsetInputs memory offsetInputs = LiquidationOffsetInputs(singleLiquidation.entireTroveDebt,
+                                                                                      actualTroveDebt,
+                                                                                      singleLiquidation.entireTroveColl-singleLiquidation.collGasCompensation,
+                                                                                      _LUSDInSPForOffsets, 
+                                                                                      _price,
+                                                                                      _par,
+                                                                                      _accumulatedRate,
+                                                                                      LIQUIDATION_PENALTY,
+                                                                                      LIQUIDATION_PENALTY_REDIST);
+
 
         (singleLiquidation.debtToOffset,
         singleLiquidation.collToSendToSP,
         singleLiquidation.debtToRedistribute,
-        singleLiquidation.collToRedistribute) = _getOffsetAndRedistributionVals(singleLiquidation.entireTroveDebt,
-                                                                                collToLiquidate,
-                                                                                _LUSDInSPForOffsets);
+        singleLiquidation.collToRedistribute,
+        singleLiquidation.collSurplus) = getCappedOffsetAndRedistributionVals(offsetInputs);
 
-        uint totalSp = stabilityPool.getTotalLUSDDeposits();
+        /*
+        uint collToLiquidate = singleLiquidation.entireTroveColl.sub(singleLiquidation.collGasCompensation);
         emit TroveLiqInfo(singleLiquidation.entireTroveColl, singleLiquidation.entireTroveDebt, collToLiquidate,
                           singleLiquidation.collToSendToSP, singleLiquidation.collToRedistribute,
-                          actualTroveDebt, totalSp, _LUSDInSPForOffsets);
+                          actualTroveDebt, _LUSDInSPForOffsets);
                           //actualTroveDebt, _LUSDInSPForOffsets);
+        */
 
         _closeTrove(_borrower, Status.closedByLiquidation);
+
+        if (singleLiquidation.collSurplus > 0) {
+            collSurplusPool.accountSurplus(_borrower, singleLiquidation.collSurplus);
+        }
         //emit TroveLiquidated(_borrower, actualTroveDebt, singleLiquidation.entireTroveColl, TroveManagerOperation.liquidate);
         //emit TroveUpdated(_borrower, 0, 0, 0, TroveManagerOperation.liquidate);
         return singleLiquidation;
     }
 
-    /* In a full liquidation, returns the values for a trove's coll and debt to be offset, and coll and debt to be
-    * redistributed to active troves.
-    */
-    function _getOffsetAndRedistributionVals
-    (
-        uint _debt, // actual
-        uint _coll,
-        uint _LUSDInSPForOffsets
-    )
-        internal
-        pure
-        returns (uint debtToOffset, uint collToSendToSP, uint debtToRedistribute, uint collToRedistribute)
-    {
-        if (_LUSDInSPForOffsets > 0) {
-        /*
-        * Offset as much debt & collateral as possible against the Stability Pool, and redistribute the remainder
-        * between all active troves.
-        *
-        *  If the trove's debt is larger than the deposited LUSD in the Stability Pool:
-        *
-        *  - Offset an amount of the trove's debt equal to the LUSD in the Stability Pool
-        *  - Send a fraction of the trove's collateral to the Stability Pool, equal to the fraction of its offset debt
-        *
-        */
-            debtToOffset = LiquityMath._min(_debt, _LUSDInSPForOffsets);
-            collToSendToSP = _coll.mul(debtToOffset).div(_debt);
-            debtToRedistribute = _debt.sub(debtToOffset);
-            collToRedistribute = _coll.sub(collToSendToSP);
-        } else {
-            debtToOffset = 0;
-            collToSendToSP = 0;
-            debtToRedistribute = _debt;
-            collToRedistribute = _coll;
-        }
-    }
 
     /*
     * Liquidate a sequence of troves. Closes a maximum number of n under-collateralized Troves,
@@ -417,14 +522,14 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
 
         LiquidationTotals memory totals;
 
-        (uint interestRate, ) = relayer.getRateAndPar();
+        (uint interestRate, uint par) = relayer.getRateAndPar();
 
         _drip(interestRate);
         vars.price = priceFeed.fetchPrice();
         vars.LUSDInSPForOffsets = _normalizedDebt(stabilityPoolCached.getMaxAmountToOffset());
 
         // Perform the liquidation sequence - tally the values, and obtain their totals
-        totals = _getTotalsFromLiquidate(contractsCache.activePool, contractsCache.defaultPool, vars.price, vars.LUSDInSPForOffsets, _n);
+        totals = _getTotalsFromLiquidate(contractsCache.activePool, contractsCache.defaultPool, vars.price, vars.LUSDInSPForOffsets, _n, par);
 
         require(totals.totalDebtInSequence > 0, "TroveManager: nothing to liquidate");
  
@@ -447,6 +552,7 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
 
         vars.liquidatedDebt = _actualDebt(totals.totalDebtInSequence);
         vars.liquidatedColl = totals.totalCollInSequence.sub(totals.totalCollGasCompensation).sub(totals.totalCollSurplus);
+        //vars.liquidatedColl = 0;
         emit Liquidation(vars.liquidatedDebt, vars.liquidatedColl, totals.totalCollGasCompensation, totals.totalLUSDGasCompensation);
 
         // Send gas compensation to caller
@@ -459,7 +565,8 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
         IDefaultPool _defaultPool,
         uint _price,
         uint _LUSDInSPForOffsets,
-        uint _n
+        uint _n, 
+        uint _par
     )
         internal
         returns(LiquidationTotals memory totals)
@@ -475,7 +582,7 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
             vars.ICR = getCurrentICR(vars.user, _price);
 
             if (vars.ICR < MCR) {
-                singleLiquidation = _liquidate(_activePool, _defaultPool, vars.user, vars.remainingLUSDInSPForOffsets);
+                singleLiquidation = _liquidate(_activePool, _defaultPool, vars.user, vars.remainingLUSDInSPForOffsets, _price, _par, accumulatedRate);
 
                 vars.remainingLUSDInSPForOffsets = vars.remainingLUSDInSPForOffsets.sub(singleLiquidation.debtToOffset);
 
@@ -490,7 +597,7 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
     * Attempt to liquidate a custom list of troves provided by the caller.
     */
     function batchLiquidate(address[] memory _troveArray) public override {
-        require(_troveArray.length != 0, "TroveManager: Calldata address array must not be empty");
+        require(_troveArray.length != 0, "TroveManager: address array must not be empty");
 
         IActivePool activePoolCached = activePool;
         IDefaultPool defaultPoolCached = defaultPool;
@@ -499,12 +606,14 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
         LocalVariables_OuterLiquidationFunction memory vars;
         LiquidationTotals memory totals;
 
+        (uint interestRate, uint par) = relayer.getRateAndPar();
+
         vars.price = priceFeed.fetchPrice();
         _drip(relayer.getRate());
         vars.LUSDInSPForOffsets = _normalizedDebt(stabilityPoolCached.getMaxAmountToOffset());
 
         // all normalized
-        totals = _getTotalsFromBatchLiquidate(activePoolCached, defaultPoolCached, vars.price, vars.LUSDInSPForOffsets, _troveArray);
+        totals = _getTotalsFromBatchLiquidate(activePoolCached, defaultPoolCached, vars.price, vars.LUSDInSPForOffsets, _troveArray, par);
 
         require(totals.totalDebtInSequence > 0, "TroveManager: nothing to liquidate");
 
@@ -528,6 +637,7 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
 
         vars.liquidatedDebt = _actualDebt(totals.totalDebtInSequence);
         vars.liquidatedColl = totals.totalCollInSequence.sub(totals.totalCollGasCompensation).sub(totals.totalCollSurplus);
+        //vars.liquidatedColl = 0;
         emit Liquidation(vars.liquidatedDebt, vars.liquidatedColl, totals.totalCollGasCompensation, totals.totalLUSDGasCompensation);
 
         // Send gas compensation to caller
@@ -540,7 +650,8 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
         IDefaultPool _defaultPool,
         uint _price,
         uint _LUSDInSPForOffsets,
-        address[] memory _troveArray
+        address[] memory _troveArray,
+        uint _par
     )
         internal
         returns(LiquidationTotals memory totals)
@@ -555,7 +666,7 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
             vars.ICR = getCurrentICR(vars.user, _price);
 
             if (vars.ICR < MCR) {
-                singleLiquidation = _liquidate(_activePool, _defaultPool, vars.user, vars.remainingLUSDInSPForOffsets);
+                singleLiquidation = _liquidate(_activePool, _defaultPool, vars.user, vars.remainingLUSDInSPForOffsets, _price, _par, accumulatedRate);
 
                 vars.remainingLUSDInSPForOffsets = vars.remainingLUSDInSPForOffsets.sub(singleLiquidation.debtToOffset);
 
@@ -566,7 +677,6 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
     }
 
     // --- Liquidation helper functions ---
-
     function _addLiquidationValuesToTotals(LiquidationTotals memory oldTotals, LiquidationValues memory singleLiquidation)
     internal view returns(LiquidationTotals memory newTotals) {
 
@@ -649,9 +759,11 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
         } else {
             //uint newNICR = LiquityMath._computeNominalCR(newColl, _actualDebt(newDebt));
             uint newNICR = LiquityMath._computeNominalCR(newColl, newDebt);
+            /*
             if (_getNetDebt(_actualDebt(newDebt)) < MIN_NET_DEBT) {
                 newNICR = 0;
             }
+            */
             /*
             * If the provided hint is out of date, we bail since trying to reinsert without a good hint will almost
             * certainly result in running out of gas. 
@@ -661,7 +773,7 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
             //if (newNICR != _partialRedemptionHintNICR || _getNetDebt(newDebt) < MIN_NET_DEBT) {
 
             if (newNICR != hints.partialNICR || _getNetDebt(_actualDebt(newDebt)) < MIN_NET_DEBT) {
-                emit PartialNicr(_borrower, newNICR, _actualDebt(newDebt));
+                //emit PartialNicr(_borrower, newNICR, _actualDebt(newDebt));
                 singleRedemption.cancelledPartial = true;
                 return singleRedemption;
             }
@@ -990,6 +1102,12 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
         coll = coll.add(pendingETHReward);
     }
 
+    /*
+    function getEntireSystemActualDebt() public view override returns (uint debt) {
+        return getEntireNormalizedSystemDebt().mul(accumulatedRate).div(RATE_PRECISION);
+    }
+    */
+
     function removeStake(address _borrower) external override {
         _requireCallerIsBorrowerOperations();
         return _removeStake(_borrower);
@@ -1252,11 +1370,6 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
         return accRate * LiquityMath._rpower(interestRate, secondsPassed, RATE_PRECISION) / RATE_PRECISION;
     }
 
-    // Internal helper to get minutes passed since last update
-    function _minutesPassedSinceLastAccRateUpdate() internal view returns (uint256) {
-        return (block.timestamp - lastAccRateUpdateTime) / SECONDS_IN_ONE_MINUTE;
-    }
-
     function _getTCR(uint _price) internal view returns (uint TCR) {
         uint entireSystemColl = getEntireSystemColl();
         uint entireSystemDebt = getEntireSystemDebt(accumulatedRate);
@@ -1315,7 +1428,7 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
     // --- 'require' wrapper functions ---
 
     function _requireCallerIsBorrowerOperations() internal view {
-        require(msg.sender == borrowerOperationsAddress, "TroveManager: Caller is not the BorrowerOperations contract");
+        require(msg.sender == borrowerOperationsAddress, "TroveManager: Caller is not BO contract");
     }
 
     function _requireTroveIsActive(address _borrower) internal view {
@@ -1323,7 +1436,7 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
     }
 
     function _requireLUSDBalanceCoversRedemption(ILUSDToken _lusdToken, address _redeemer, uint _amount) internal view {
-        require(_lusdToken.balanceOf(_redeemer) >= _amount, "TroveManager: Requested redemption amount must be <= user's LUSD token balance");
+        require(_lusdToken.balanceOf(_redeemer) >= _amount, "TroveManager: Requested redemption amount must be <= user's LUSD balance");
     }
 
     function _requireMoreThanOneTroveInSystem(uint TroveOwnersArrayLength) internal view {
@@ -1340,7 +1453,7 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
 
     function _requireAfterBootstrapPeriod() internal view {
         uint systemDeploymentTime = lqtyToken.getDeploymentStartTime();
-        require(block.timestamp >= systemDeploymentTime.add(BOOTSTRAP_PERIOD), "TroveManager: Redemptions are not allowed during bootstrap phase");
+        require(block.timestamp >= systemDeploymentTime.add(BOOTSTRAP_PERIOD), "TroveManager: Redemptions not allowed during bootstrap");
     }
 
     function _requireValidMaxFeePercentage(uint _maxFeePercentage) internal pure {

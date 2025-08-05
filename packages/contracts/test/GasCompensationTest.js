@@ -961,8 +961,12 @@ contract('Gas compensation tests', async accounts => {
     await openTrove({ ICR: toBN(dec(526, 16)), extraLUSDAmount: dec(8000, 18), extraParams: { from: bob } })
     await openTrove({ ICR: toBN(dec(488, 16)), extraLUSDAmount: dec(600, 18), extraParams: { from: carol } })
     await openTrove({ ICR: toBN(dec(545, 16)), extraLUSDAmount: dec(1, 23), extraParams: { from: dennis } })
-    await openTrove({ ICR: toBN(dec(10, 18)), extraLUSDAmount: dec(1, 23), extraParams: { from: erin } })
-    await openTrove({ ICR: toBN(dec(10, 18)), extraLUSDAmount: dec(1, 23), extraParams: { from: flyn } })
+
+
+    // give these more ICR so price can be dropped more and no surplus collateral is left
+    // this test liquidation_penalty under full collateral seizure
+    await openTrove({ ICR: toBN(dec(20, 18)), extraLUSDAmount: dec(1, 23), extraParams: { from: erin } })
+    await openTrove({ ICR: toBN(dec(20, 18)), extraLUSDAmount: dec(1, 23), extraParams: { from: flyn } })
 
     // D, E each provide 10000 LUSD to SP
     await stabilityPool.provideToSP(dec(1, 23), ZERO_ADDRESS, { from: erin })
@@ -970,8 +974,8 @@ contract('Gas compensation tests', async accounts => {
 
     const LUSDinSP_0 = await stabilityPool.getTotalLUSDDeposits()
 
-    // price drops to 200 
-    await priceFeed.setPrice(dec(200, 18))
+    // price drops to 100 
+    await priceFeed.setPrice(dec(100, 18))
     const price = await priceFeed.getPrice()
 
     // Check not in Recovery Mode 
@@ -1001,7 +1005,8 @@ contract('Gas compensation tests', async accounts => {
     const _0pt5percent_dennisColl = dennisColl.div(web3.utils.toBN('200'))
 
     const collGasCompensation = await troveManagerTester.getCollGasCompensation(price)
-    assert.equal(collGasCompensation, dec(1, 18))
+    assert.equal(collGasCompensation, dec(5, 17))
+    //assert.equal(collGasCompensation, dec(1, 18))
 
     /* Expect total gas compensation = 
     0.5% of [A_coll + B_coll + C_coll + D_coll]
@@ -1126,8 +1131,11 @@ contract('Gas compensation tests', async accounts => {
     const { totalDebt: B_totalDebt } = await openTrove({ ICR: toBN(dec(526, 16)), extraLUSDAmount: dec(8000, 18), extraParams: { from: bob } })
     const { totalDebt: C_totalDebt } = await openTrove({ ICR: toBN(dec(488, 16)), extraLUSDAmount: dec(600, 18), extraParams: { from: carol } })
     const { totalDebt: D_totalDebt } = await openTrove({ ICR: toBN(dec(545, 16)), extraLUSDAmount: dec(1, 23), extraParams: { from: dennis } })
-    await openTrove({ ICR: toBN(dec(10, 18)), extraLUSDAmount: dec(1, 23), extraParams: { from: erin } })
-    await openTrove({ ICR: toBN(dec(10, 18)), extraLUSDAmount: dec(1, 23), extraParams: { from: flyn } })
+
+    // Increased these troves to 20 ICR so price can be dropped to 100 and the liquidation
+    // seizes full collateral
+    await openTrove({ ICR: toBN(dec(20, 18)), extraLUSDAmount: dec(1, 23), extraParams: { from: erin } })
+    await openTrove({ ICR: toBN(dec(20, 18)), extraLUSDAmount: dec(1, 23), extraParams: { from: flyn } })
 
     // D, E each provide 10000 LUSD to SP
     await stabilityPool.provideToSP(dec(1, 23), ZERO_ADDRESS, { from: erin })
@@ -1136,7 +1144,7 @@ contract('Gas compensation tests', async accounts => {
     const LUSDinSP_0 = await stabilityPool.getTotalLUSDDeposits()
 
     // price drops to 200 
-    await priceFeed.setPrice(dec(200, 18))
+    await priceFeed.setPrice(dec(100, 18))
     const price = await priceFeed.getPrice()
 
     // Check not in Recovery Mode 
@@ -1166,7 +1174,8 @@ contract('Gas compensation tests', async accounts => {
     const _0pt5percent_dennisColl = dennisColl.div(web3.utils.toBN('200'))
 
     const collGasCompensation = await troveManagerTester.getCollGasCompensation(price)
-    assert.equal(collGasCompensation, dec(1, 18))
+    //assert.equal(collGasCompensation, dec(1, 18))
+    assert.equal(collGasCompensation, dec(5, 17))
 
     /* Expect total gas compensation = 
     0.5% of [A_coll + B_coll + C_coll + D_coll]
