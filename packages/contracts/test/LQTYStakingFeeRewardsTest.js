@@ -4,6 +4,7 @@ const { BNConverter } = require("../utils/BNConverter.js")
 const testHelpers = require("../utils/testHelpers.js")
 
 const LQTYStakingTester = artifacts.require('LQTYStakingTester')
+const AggregatorTester = artifacts.require("AggregatorTester")
 const TroveManagerTester = artifacts.require("TroveManagerTester")
 const RateControlTester = artifacts.require("RateControlTester")
 const NonPayable = artifacts.require("./NonPayable.sol")
@@ -51,6 +52,7 @@ contract('LQTYStaking revenue share tests', async accounts => {
 
   beforeEach(async () => {
     contracts = await deploymentHelper.deployLiquityCore()
+    contracts.aggregator = await AggregatorTester.new()
     contracts.troveManager = await TroveManagerTester.new()
     contracts.rateControl = await RateControlTester.new()
     contracts = await deploymentHelper.deployLUSDTokenTester(contracts)
@@ -64,6 +66,7 @@ contract('LQTYStaking revenue share tests', async accounts => {
     priceFeed = contracts.priceFeedTestnet
     lusdToken = contracts.lusdToken
     sortedTroves = contracts.sortedTroves
+    aggregator = contracts.aggregator
     troveManager = contracts.troveManager
     activePool = contracts.activePool
     stabilityPool = contracts.stabilityPool
@@ -193,7 +196,7 @@ contract('LQTYStaking revenue share tests', async accounts => {
     assert.isTrue(B_BalAfterRedemption.lt(B_BalBeforeREdemption))
 
     // Check base rate is now non-zero
-    const baseRate = await troveManager.baseRate()
+    const baseRate = await aggregator.baseRate()
     assert.isTrue(baseRate.gt(toBN('0')))
 
     // D draws debt
@@ -233,7 +236,7 @@ contract('LQTYStaking revenue share tests', async accounts => {
     assert.isTrue(B_BalAfterRedemption.lt(B_BalBeforeREdemption))
 
     // Check base rate is now non-zero
-    const baseRate = await troveManager.baseRate()
+    const baseRate = await aggregator.baseRate()
     assert.isTrue(baseRate.gt(toBN('0')))
 
     // D draws debt

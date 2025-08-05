@@ -2,6 +2,7 @@ const deploymentHelper = require("../utils/deploymentHelpers.js")
 const testHelpers = require("../utils/testHelpers.js")
 const testInvariants = require("../utils/testInvariants.js")
 const TroveManagerTester = artifacts.require("./TroveManagerTester.sol")
+const AggregatorTester = artifacts.require("./AggregatorTester.sol")
 const RelayerTester = artifacts.require("./RelayerTester.sol")
 const RateControlTester = artifacts.require("./RateControlTester.sol")
 const LUSDTokenTester = artifacts.require("./LUSDTokenTester.sol")
@@ -61,6 +62,7 @@ contract('TroveManager', async accounts => {
 
   beforeEach(async () => {
     contracts = await deploymentHelper.deployLiquityCore()
+    contracts.aggregator = await AggregatorTester.new()
     contracts.troveManager = await TroveManagerTester.new()
     contracts.rateControl = await RateControlTester.new()
     contracts.lusdToken = await LUSDTokenTester.new(
@@ -73,6 +75,7 @@ contract('TroveManager', async accounts => {
     priceFeed = contracts.priceFeedTestnet
     lusdToken = contracts.lusdToken
     sortedTroves = contracts.sortedTroves
+    aggregator = contracts.aggregator
     troveManager = contracts.troveManager
     activePool = contracts.activePool
     stabilityPool = contracts.stabilityPool
@@ -3411,7 +3414,7 @@ contract('TroveManager', async accounts => {
     await lusdToken.transfer(B, await lusdToken.balanceOf(A), {from: A})
     await lusdToken.transfer(B, await lusdToken.balanceOf(C), {from: C})
     
-    await troveManager.setBaseRate(0) 
+    await aggregator.setBaseRate(0) 
 
     // skip bootstrapping phase
     await th.fastForwardTime(timeValues.SECONDS_IN_ONE_WEEK * 2, web3.currentProvider)
@@ -3439,7 +3442,7 @@ contract('TroveManager', async accounts => {
     await lusdToken.transfer(B, await lusdToken.balanceOf(A), {from: A})
     await lusdToken.transfer(B, await lusdToken.balanceOf(C), {from: C})
 
-    await troveManager.setBaseRate(0) 
+    await aggregator.setBaseRate(0) 
 
     // Skip bootstrapping phase
     await th.fastForwardTime(timeValues.SECONDS_IN_ONE_WEEK * 2, web3.currentProvider)
@@ -3776,7 +3779,7 @@ contract('TroveManager', async accounts => {
     const totalSupply = await lusdToken.totalSupply()
     th.assertIsApproximatelyEqual(totalSupply, expectedTotalSupply)
 
-    await troveManager.setBaseRate(0) 
+    await aggregator.setBaseRate(0) 
 
     // skip bootstrapping phase
     await th.fastForwardTime(timeValues.SECONDS_IN_ONE_WEEK * 2, web3.currentProvider)
@@ -3788,17 +3791,17 @@ contract('TroveManager', async accounts => {
     const lessThan5pct = '49999999999999999'
     await assertRevert(th.redeemCollateralAndGetTxObject(A, contracts, attemptedLUSDRedemption, lessThan5pct), "Fee exceeded provided maximum")
   
-    await troveManager.setBaseRate(0)  // artificially zero the baseRate
+    await aggregator.setBaseRate(0)  // artificially zero the baseRate
     
     // Max fee is 1%
     await assertRevert(th.redeemCollateralAndGetTxObject(A, contracts, attemptedLUSDRedemption, dec(1, 16)), "Fee exceeded provided maximum")
   
-    await troveManager.setBaseRate(0)
+    await aggregator.setBaseRate(0)
 
      // Max fee is 3.754%
     await assertRevert(th.redeemCollateralAndGetTxObject(A, contracts, attemptedLUSDRedemption, dec(3754, 13)), "Fee exceeded provided maximum")
   
-    await troveManager.setBaseRate(0)
+    await aggregator.setBaseRate(0)
 
     // Max fee is 0.5%
     await assertRevert(th.redeemCollateralAndGetTxObject(A, contracts, attemptedLUSDRedemption, dec(5, 15)), "Fee exceeded provided maximum")
@@ -3814,7 +3817,7 @@ contract('TroveManager', async accounts => {
     const totalSupply = await lusdToken.totalSupply()
     th.assertIsApproximatelyEqual(totalSupply, expectedTotalSupply)
 
-    await troveManager.setBaseRate(0) 
+    await aggregator.setBaseRate(0) 
 
     // skip bootstrapping phase
     await th.fastForwardTime(timeValues.SECONDS_IN_ONE_WEEK * 2, web3.currentProvider)
@@ -3825,30 +3828,30 @@ contract('TroveManager', async accounts => {
     // Attempt with maxFee > 5.5%
     const price = await priceFeed.getPrice()
     const ETHDrawn = attemptedLUSDRedemption.mul(mv._1e18BN).div(price)
-    const slightlyMoreThanFee = (await troveManager.getRedemptionFeeWithDecay(ETHDrawn))
+    const slightlyMoreThanFee = (await aggregator.getRedemptionFeeWithDecay(ETHDrawn))
     const tx1 = await th.redeemCollateralAndGetTxObject(A, contracts, attemptedLUSDRedemption, slightlyMoreThanFee)
     assert.isTrue(tx1.receipt.status)
 
-    await troveManager.setBaseRate(0)  // Artificially zero the baseRate
+    await aggregator.setBaseRate(0)  // Artificially zero the baseRate
     
     // Attempt with maxFee = 5.5%
-    const exactSameFee = (await troveManager.getRedemptionFeeWithDecay(ETHDrawn))
+    const exactSameFee = (await aggregator.getRedemptionFeeWithDecay(ETHDrawn))
     const tx2 = await th.redeemCollateralAndGetTxObject(C, contracts, attemptedLUSDRedemption, exactSameFee)
     assert.isTrue(tx2.receipt.status)
 
-    await troveManager.setBaseRate(0)
+    await aggregator.setBaseRate(0)
 
      // Max fee is 10%
     const tx3 = await th.redeemCollateralAndGetTxObject(B, contracts, attemptedLUSDRedemption, dec(1, 17))
     assert.isTrue(tx3.receipt.status)
 
-    await troveManager.setBaseRate(0)
+    await aggregator.setBaseRate(0)
 
     // Max fee is 37.659%
     const tx4 = await th.redeemCollateralAndGetTxObject(A, contracts, attemptedLUSDRedemption, dec(37659, 13))
     assert.isTrue(tx4.receipt.status)
 
-    await troveManager.setBaseRate(0)
+    await aggregator.setBaseRate(0)
 
     // Max fee is 100%
     const tx5 = await th.redeemCollateralAndGetTxObject(C, contracts, attemptedLUSDRedemption, dec(1, 18))
@@ -4450,7 +4453,7 @@ contract('TroveManager', async accounts => {
     await openTrove({ ICR: toBN(dec(180, 16)), extraLUSDAmount: dec(100, 18), extraParams: { from: C } })
 
     // Check baseRate == 0
-    assert.equal(await troveManager.baseRate(), '0')
+    assert.equal(await aggregator.baseRate(), '0')
 
     // skip bootstrapping phase
     await th.fastForwardTime(timeValues.SECONDS_IN_ONE_WEEK * 2, web3.currentProvider)
@@ -4463,7 +4466,7 @@ contract('TroveManager', async accounts => {
     assert.equal(await lusdToken.balanceOf(A), A_balanceBefore.sub(toBN(dec(10, 18))).toString())
 
     // Check baseRate is now non-zero
-    assert.isTrue((await troveManager.baseRate()).gt(toBN('0')))
+    assert.isTrue((await aggregator.baseRate()).gt(toBN('0')))
   })
 
   it("redeemCollateral(): a redemption made when base rate is non-zero increases the base rate, for negligible time passed", async () => {
@@ -4479,7 +4482,7 @@ contract('TroveManager', async accounts => {
     await openTrove({ ICR: toBN(dec(180, 16)), extraLUSDAmount: dec(100, 18), extraParams: { from: C } })
 
     // Check baseRate == 0
-    assert.equal(await troveManager.baseRate(), '0')
+    assert.equal(await aggregator.baseRate(), '0')
 
     const A_balanceBefore = await lusdToken.balanceOf(A)
     const B_balanceBefore = await lusdToken.balanceOf(B)
@@ -4492,7 +4495,7 @@ contract('TroveManager', async accounts => {
     assert.equal(await lusdToken.balanceOf(A), A_balanceBefore.sub(toBN(dec(10, 18))).toString())
 
     // Check baseRate is now non-zero
-    const baseRate_1 = await troveManager.baseRate()
+    const baseRate_1 = await aggregator.baseRate()
     assert.isTrue(baseRate_1.gt(toBN('0')))
 
     // B redeems 10 LUSD
@@ -4505,7 +4508,7 @@ contract('TroveManager', async accounts => {
     // Check negligible time difference (< 1 minute) between txs
     assert.isTrue(Number(timeStamp_B) - Number(timeStamp_A) < 60)
 
-    const baseRate_2 = await troveManager.baseRate()
+    const baseRate_2 = await aggregator.baseRate()
 
     // Check baseRate has again increased
     assert.isTrue(baseRate_2.gt(baseRate_1))
@@ -4530,10 +4533,10 @@ contract('TroveManager', async accounts => {
     assert.equal(A_balanceBefore.sub(await lusdToken.balanceOf(A)), dec(10, 18))
 
     // Check baseRate is now non-zero
-    const baseRate_1 = await troveManager.baseRate()
+    const baseRate_1 = await aggregator.baseRate()
     assert.isTrue(baseRate_1.gt(toBN('0')))
 
-    const lastFeeOpTime_1 = await troveManager.lastFeeOperationTime()
+    const lastFeeOpTime_1 = await aggregator.lastFeeOperationTime()
 
     // 45 seconds pass
     th.fastForwardTime(45, web3.currentProvider)
@@ -4541,7 +4544,7 @@ contract('TroveManager', async accounts => {
     // Borrower A triggers a fee
     await th.redeemCollateral(A, contracts, dec(1, 18), GAS_PRICE)
 
-    const lastFeeOpTime_2 = await troveManager.lastFeeOperationTime()
+    const lastFeeOpTime_2 = await aggregator.lastFeeOperationTime()
 
     // Check that the last fee operation time did not update, as borrower A's 2nd redemption occured
     // since before minimum interval had passed 
@@ -4557,7 +4560,7 @@ contract('TroveManager', async accounts => {
     // Borrower A triggers a fee
     await th.redeemCollateral(A, contracts, dec(1, 18), GAS_PRICE)
 
-    const lastFeeOpTime_3 = await troveManager.lastFeeOperationTime()
+    const lastFeeOpTime_3 = await aggregator.lastFeeOperationTime()
 
     // Check that the last fee operation time DID update, as A's 2rd redemption occured
     // after minimum interval had passed 
@@ -4577,7 +4580,7 @@ contract('TroveManager', async accounts => {
     await openTrove({ ICR: toBN(dec(180, 16)), extraLUSDAmount: dec(100, 18), extraParams: { from: C } })
 
     // Check baseRate == 0
-    assert.equal(await troveManager.baseRate(), '0')
+    assert.equal(await aggregator.baseRate(), '0')
 
     // Check LQTY Staking contract balance before is zero
     const lqtyStakingBalance_Before = await web3.eth.getBalance(lqtyStaking.address)
@@ -4592,7 +4595,7 @@ contract('TroveManager', async accounts => {
     assert.equal(await lusdToken.balanceOf(A), A_balanceBefore.sub(toBN(dec(10, 18))).toString())
 
     // Check baseRate is now non-zero
-    const baseRate_1 = await troveManager.baseRate()
+    const baseRate_1 = await aggregator.baseRate()
     assert.isTrue(baseRate_1.gt(toBN('0')))
 
     // Check LQTY Staking contract balance after is non-zero
@@ -4613,7 +4616,7 @@ contract('TroveManager', async accounts => {
     await openTrove({ ICR: toBN(dec(180, 16)), extraLUSDAmount: dec(100, 18), extraParams: { from: C } })
 
     // Check baseRate == 0
-    assert.equal(await troveManager.baseRate(), '0')
+    assert.equal(await aggregator.baseRate(), '0')
 
     // Check LQTY Staking ETH-fees-per-LQTY-staked before is zero
     const F_ETH_Before = await lqtyStaking.F_ETH()
@@ -4628,7 +4631,7 @@ contract('TroveManager', async accounts => {
     assert.equal(await lusdToken.balanceOf(A), A_balanceBefore.sub(toBN(dec(10, 18))).toString())
 
     // Check baseRate is now non-zero
-    const baseRate_1 = await troveManager.baseRate()
+    const baseRate_1 = await aggregator.baseRate()
     assert.isTrue(baseRate_1.gt(toBN('0')))
 
     // Check LQTY Staking ETH-fees-per-LQTY-staked after is non-zero
@@ -4649,7 +4652,7 @@ contract('TroveManager', async accounts => {
     await openTrove({ ICR: toBN(dec(180, 16)), extraLUSDAmount: dec(100, 18), extraParams: { from: C } })
 
     // Check baseRate == 0
-    assert.equal(await troveManager.baseRate(), '0')
+    assert.equal(await aggregator.baseRate(), '0')
 
     const A_balanceBefore = await lusdToken.balanceOf(A)
     const B_balanceBefore = await lusdToken.balanceOf(B)
@@ -4661,7 +4664,7 @@ contract('TroveManager', async accounts => {
     assert.equal(await lusdToken.balanceOf(A), A_balanceBefore.sub(toBN(dec(10, 18))).toString())
 
     // Check baseRate is now non-zero
-    const baseRate_1 = await troveManager.baseRate()
+    const baseRate_1 = await aggregator.baseRate()
     assert.isTrue(baseRate_1.gt(toBN('0')))
 
     const lqtyStakingBalance_Before = toBN(await web3.eth.getBalance(lqtyStaking.address))
@@ -4691,7 +4694,7 @@ contract('TroveManager', async accounts => {
     await openTrove({ ICR: toBN(dec(180, 16)), extraLUSDAmount: dec(100, 18), extraParams: { from: C } })
 
     // Check baseRate == 0
-    assert.equal(await troveManager.baseRate(), '0')
+    assert.equal(await aggregator.baseRate(), '0')
 
     const A_balanceBefore = await lusdToken.balanceOf(A)
     const B_balanceBefore = await lusdToken.balanceOf(B)
@@ -4703,7 +4706,7 @@ contract('TroveManager', async accounts => {
     assert.equal(await lusdToken.balanceOf(A), A_balanceBefore.sub(toBN(dec(10, 18))).toString())
 
     // Check baseRate is now non-zero
-    const baseRate_1 = await troveManager.baseRate()
+    const baseRate_1 = await aggregator.baseRate()
     assert.isTrue(baseRate_1.gt(toBN('0')))
 
     // Check LQTY Staking ETH-fees-per-LQTY-staked before is zero
@@ -4737,7 +4740,7 @@ contract('TroveManager', async accounts => {
     const A_balanceBefore = toBN(await web3.eth.getBalance(A))
 
     // Confirm baseRate before redemption is 0
-    const baseRate = await troveManager.baseRate()
+    const baseRate = await aggregator.baseRate()
     assert.equal(baseRate, '0')
 
     // Check total LUSD supply
@@ -4828,7 +4831,7 @@ contract('TroveManager', async accounts => {
     const D_collBefore = await troveManager.getTroveColl(D)
 
     // Confirm baseRate before redemption is 0
-    const baseRate = await troveManager.baseRate()
+    const baseRate = await aggregator.baseRate()
     assert.equal(baseRate, '0')
 
     // whale redeems LUSD.  Expect this to fully redeem A, B, C, and partially redeem D.
