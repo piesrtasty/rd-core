@@ -62,6 +62,7 @@ contract('SortedTroves', async accounts => {
       contracts.troveManager = await TroveManagerTester.new()
       contracts.lusdToken = await LUSDToken.new(
         contracts.troveManager.address,
+        contracts.liquidations.address,
         contracts.stabilityPool.address,
         contracts.borrowerOperations.address
       )
@@ -76,6 +77,8 @@ contract('SortedTroves', async accounts => {
       await deploymentHelper.connectLQTYContracts(LQTYContracts)
       await deploymentHelper.connectCoreContracts(contracts, LQTYContracts)
       await deploymentHelper.connectLQTYContractsToCore(LQTYContracts, contracts)
+
+      await th.mintCollateralTokens(contracts, accounts, toBN(dec(1000, 26)))
     })
 
     it('contains(): returns true for addresses that have opened troves', async () => {
@@ -266,7 +269,7 @@ contract('SortedTroves', async accounts => {
       const price_2 = await priceFeed.getPrice()
 
       // Liquidate a trove
-      await troveManager.liquidate(defaulter_1)
+      await liquidations.liquidate(defaulter_1)
       assert.isFalse(await sortedTroves.contains(defaulter_1))
 
       // Check troves are ordered

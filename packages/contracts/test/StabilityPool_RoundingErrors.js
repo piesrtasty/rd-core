@@ -56,11 +56,11 @@ contract('Pool Manager: Sum-Product rounding errors', async accounts => {
 
     // Defaulters liquidated
     for (let defaulter of defaulters) {
-      await troveManager.liquidate(defaulter, { from: owner });
+      await liquidations.liquidate(defaulter, { from: owner });
     }
 
     const SP_TotalDeposits = await stabilityPool.getTotalLUSDDeposits()
-    const SP_ETH = await stabilityPool.getETH()
+    const SP_ETH = await stabilityPool.getCollateral()
     const compoundedDeposit = await stabilityPool.getCompoundedLUSDDeposit(depositors[0])
     const ETH_Gain = await stabilityPool.getCurrentETHGain(depositors[0])
 
