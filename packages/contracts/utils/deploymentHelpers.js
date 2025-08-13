@@ -360,6 +360,7 @@ class DeploymentHelper {
       LQTYContracts.lqtyStaking.address,
       contracts.relayer.address
     )
+
     contracts.borrowerWrappers = new BorrowerWrappersProxy(owner, proxies, borrowerWrappersScript.address)
 
     const borrowerOperationsScript = await BorrowerOperationsScript.new(contracts.borrowerOperations.address)
@@ -455,16 +456,8 @@ class DeploymentHelper {
       contracts.sortedTroves.address,
       LQTYContracts.lqtyToken.address,
       LQTYContracts.lqtyStaking.address,
-      contracts.relayer.address
+      contracts.relayer.address,
     )
-
-    // set contracts in the Aggregator
-    await contracts.aggregator.setAddresses(
-      contracts.troveManager.address,
-      contracts.lusdToken.address,
-    )
-
-
 
     // set contracts in the Pools
     await contracts.stabilityPool.setAddresses(
@@ -515,6 +508,11 @@ class DeploymentHelper {
 
     await contracts.rateControl.setAddresses(
       contracts.relayer.address
+    )
+
+    await contracts.aggregator.setAddresses(
+      contracts.troveManager.address,
+      contracts.lusdToken.address
     )
   }
 

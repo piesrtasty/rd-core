@@ -93,6 +93,7 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
     // Snapshot of the total collateral across the ActivePool and DefaultPool, immediately after the latest liquidation.
     uint public totalCollateralSnapshot;
 
+
     /*
     * L_COLL and L_LUSDDebt track the sums of accumulated liquidation rewards per unit staked. During its lifetime, each stake earns:
     *
@@ -678,7 +679,7 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
         return stake;
     }
     function redistributeDebtAndColl(uint _debt, uint _coll) external override {
-        // requirecallerisliq
+        _requireCallerIsLiquidations();
         _redistributeDebtAndColl(activePool, defaultPool, _debt, _coll);
     }
     // norm debt

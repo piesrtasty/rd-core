@@ -339,6 +339,15 @@ class TestHelper {
     });
     return this.toBN(rawHex)
   }
+
+  static async getNominalICR(contracts, account) {
+    const rawHex = await web3.eth.call({
+      to: contracts.troveManager.address,
+      data: contracts.troveManager.contract.methods.getNominalICR(account).encodeABI()
+    });
+    return this.toBN(rawHex)
+  }
+
   // Adds the gas compensation (50 LUSD)
   static async getCompositeDebt(contracts, debt) {
     const compositeDebt = contracts.borrowerOperations.getCompositeDebt(debt)
@@ -360,6 +369,17 @@ class TestHelper {
     for (const account of accounts) {
       await contracts.collateralToken.mint(account, amount)
     }
+  }
+
+  static async approveCollateralTokens(contracts, accounts, amount) {
+    for (const account of accounts) {
+      await contracts.collateralToken.approve(contracts.activePool.address, amount, { from: account })
+    }
+  }
+
+  static async mintCollateralTokensAndApproveActivePool(contracts, accounts, amount) {
+    await this.mintCollateralTokens(contracts, accounts, amount)
+    await this.approveCollateralTokens(contracts, accounts, amount)
   }
 
   static async getTroveStake(contracts, trove) {

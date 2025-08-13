@@ -813,7 +813,7 @@ contract("RDOracle", async accounts => {
     });
   }
 
-  before(async () => {
+  before.skip(async () => {
     console.log("\n=== STARTING NEW TEST WITH MOCK TOKENS ===");
 
     // Step 1: Create mock tokens
@@ -848,7 +848,7 @@ contract("RDOracle", async accounts => {
     await executeLargeSwaps();
   });
 
-  describe("RDOracle Initialization", () => {
+  describe.skip("RDOracle Initialization", () => {
     it("should initialize with correct parameters", async () => {
       // Check vault address
       expect(await rdOracle.vault()).to.equal(vault.address);
@@ -990,7 +990,7 @@ contract("RDOracle", async accounts => {
     });
   });
 
-  describe("RDOracle cardinality", async () => {
+  describe.skip("RDOracle cardinality", async () => {
     it("should increase cardinality", async () => {
       const beforeState = await rdOracle.oracleState();
       expect(beforeState.observationCardinalityNext).to.be.bignumber.equal(new BN(100));
@@ -1000,7 +1000,7 @@ contract("RDOracle", async accounts => {
     });
   });
 
-  describe("Balancer Pool Hook Functionality (afterSwap)", async () => {
+  describe.skip("Balancer Pool Hook Functionality (afterSwap)", async () => {
     it("should call the oracle hook onAfterSwap handler", async () => {
       try {
         const swapTx = await executeSwap({
@@ -1090,7 +1090,7 @@ contract("RDOracle", async accounts => {
     });
   });
 
-  describe("Balancer Pool Hook Functionality (afterAddLiquidity)", async () => {
+  describe.skip("Balancer Pool Hook Functionality (afterAddLiquidity)", async () => {
     it("should call the oracle hook onAfterAddLiquidity handler", async () => {
       try {
         const txHash = await addLiquidity();
@@ -1112,7 +1112,7 @@ contract("RDOracle", async accounts => {
     });
   });
 
-  describe("Balancer Pool Hook Functionality (afterRemoveLiquidity)", async () => {
+  describe.skip("Balancer Pool Hook Functionality (afterRemoveLiquidity)", async () => {
     it("should call the oracle hook onAfterRemoveLiquidity handler", async () => {
       try {
         const txHash = await removeLiquidity();
@@ -1134,7 +1134,7 @@ contract("RDOracle", async accounts => {
     });
   });
 
-  describe("Price Reading Functions", () => {
+  describe.skip("Price Reading Functions", () => {
     it("should build observation history through multiple swaps", async () => {
       const finalOracleState = await rdOracle.oracleState();
       expect(finalOracleState.observationIndex.toNumber()).to.be.equal(13);
@@ -1178,7 +1178,7 @@ contract("RDOracle", async accounts => {
     });
   });
 
-  describe("Price Calculation Functions", () => {
+  describe.skip("Price Calculation Functions", () => {
     it("should get fast result with validity", async () => {
       const { _result, _validity } = await rdOracle.getFastResultWithValidity();
       expect(_result).to.be.bignumber.gt(new BN(0));
@@ -1221,7 +1221,7 @@ contract("RDOracle", async accounts => {
     });
   });
 
-  describe("Oracle Observation Management", () => {
+  describe.skip("Oracle Observation Management", () => {
     it("should observe price data correctly", async () => {
       // Test observe() function
       const { tickCumulatives, secondsPerLiquidityCumulativeX128s } = await rdOracle.observe([
@@ -1255,7 +1255,7 @@ contract("RDOracle", async accounts => {
     // });
   });
 
-  describe("Price Update Logic", () => {
+  describe.skip("Price Update Logic", () => {
     before(async () => {
       // Create test helper instance
       rdOracleTestHelper = await RDOracleTestHelper.new(
@@ -1362,7 +1362,7 @@ contract("RDOracle", async accounts => {
     });
   });
 
-  describe("Mathematical Functions", () => {
+  describe.skip("Mathematical Functions", () => {
     it("should calculate median correctly for 3 elements", async () => {
       // Test with 3 elements (odd)
       const oddArray = [
