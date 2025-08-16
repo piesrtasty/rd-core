@@ -299,23 +299,6 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable {
     }
 
     /// @inheritdoc IRDOracle
-    // function getFastResultWithValidity() public view returns (uint256 _result, bool _validity) {
-    //     // If the pool doesn't have enough history return false
-
-    //     uint32[] memory secondsAgos = new uint32[](2);
-    //     secondsAgos[0] = quotePeriodFast;
-    //     secondsAgos[1] = _MIN_PRICE_AGE;
-    //     (int56[] memory tickCumulatives, ) = this.observe(secondsAgos);
-    //     int56 tickCumulativesDelta = tickCumulatives[1] - tickCumulatives[0];
-    //     int24 arithmeticMeanTick = int24(
-    //         tickCumulativesDelta / int56(int32(quotePeriodFast - _MIN_PRICE_AGE))
-    //     );
-    //     uint160 sqrtPriceX96 = TickMath.getSqrtRatioAtTick(arithmeticMeanTick);
-    //     _result = _convertSqrtPriceX96ToPrice(sqrtPriceX96);
-    //     _validity = true;
-    // }
-
-    /// @inheritdoc IRDOracle
     function getFastResultWithValidity() public view returns (uint256 _result, bool _validity) {
         uint32[] memory secondsAgos = new uint32[](2);
         secondsAgos[0] = quotePeriodFast;
@@ -338,23 +321,6 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable {
         }
         return _fastResult;
     }
-
-    /// @inheritdoc IRDOracle
-    // function getSlowResultWithValidity() public view returns (uint256 _result, bool _validity) {
-    //     // If the pool doesn't have enough history return false
-
-    //     uint32[] memory secondsAgos = new uint32[](2);
-    //     secondsAgos[0] = quotePeriodSlow;
-    //     secondsAgos[1] = _MIN_PRICE_AGE;
-    //     (int56[] memory tickCumulatives, ) = this.observe(secondsAgos);
-    //     int56 tickCumulativesDelta = tickCumulatives[1] - tickCumulatives[0];
-    //     int24 arithmeticMeanTick = int24(
-    //         tickCumulativesDelta / int56(int32(quotePeriodSlow - _MIN_PRICE_AGE))
-    //     );
-    //     uint160 sqrtPriceX96 = TickMath.getSqrtRatioAtTick(arithmeticMeanTick);
-    //     _result = _convertSqrtPriceX96ToPrice(sqrtPriceX96);
-    //     _validity = true;
-    // }
 
     /// @inheritdoc IRDOracle
     function getSlowResultWithValidity() public view returns (uint256 _result, bool _validity) {
