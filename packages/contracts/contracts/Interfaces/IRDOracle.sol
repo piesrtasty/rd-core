@@ -139,6 +139,12 @@ interface IRDOracle {
     function rdToken() external view returns (address _rdToken);
 
     /**
+     * @notice Getter for the relayer address
+     * @return _relayer The relayer address
+     */
+    function relayer() external view returns (address _relayer);
+
+    /**
      * @notice Getter for the stablecoin basket
      * @return _stablecoinBasket The stablecoin basket
      */
@@ -242,6 +248,12 @@ interface IRDOracle {
         );
 
     // --- Methods ---
+
+    /**
+     * @notice Set the relayer address
+     * @param _relayer The relayer address
+     */
+    function setRelayer(address _relayer) external;
 
     /**
      * @notice Fetch the latest fast oracle result and whether it is valid or not

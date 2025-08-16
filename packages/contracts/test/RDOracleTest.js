@@ -5,9 +5,12 @@ const { Decimal } = require("decimal.js");
 const _BN = require("bn.js");
 
 const testHelpers = require("../utils/testHelpers.js");
+const deploymentHelper = require("../utils/deploymentHelpers.js");
 
 const th = testHelpers.TestHelper;
 const assertRevert = th.assertRevert;
+
+const RelayerTester = artifacts.require("./RelayerTester.sol");
 
 const RDOracleTestHelper = artifacts.require("./TestContracts/RDOracleTestHelper.sol");
 const RDOracle = artifacts.require("./RDOracle.sol");
@@ -56,6 +59,7 @@ contract("RDOracle", async accounts => {
   let RD, USDC, USDT, DAI;
   let vault, iVault, rdOracle, stablePoolFactory;
   let newPoolAddress, poolId;
+  let coreContracts, relayer;
 
   const provider = new ethers.providers.JsonRpcProvider();
   const ethersSigner = provider.getSigner(anvilAccount1);
@@ -594,6 +598,70 @@ contract("RDOracle", async accounts => {
     }
   }
 
+  async function deployCoreProtocol(logSetup = false) {
+    coreContracts = await deploymentHelper.deployLiquityCore();
+    const showLogs = logsOn && logSetup;
+    if (showLogs) {
+      console.log("Core contracts deployed successfully:", Object.keys(coreContracts));
+    }
+  }
+
+  async function setupRelayerAndOracle(logSetup = false) {
+    const showLogs = logsOn && logSetup;
+    relayer = coreContracts.relayer;
+
+    const parControlAddress = coreContracts.parControl.address;
+    const rateControlAddress = coreContracts.rateControl.address;
+    const marketOracleAddress = rdOracle.address;
+    const troveManagerAddress = coreContracts.troveManager.address;
+    const borrowerOperationsAddress = coreContracts.borrowerOperations.address;
+
+    if (showLogs) {
+      console.log("--------------------------------");
+      console.log("relayer addresses to set");
+      console.log("--------------------------------");
+      console.log("parControl", parControlAddress);
+      console.log("rateControl", rateControlAddress);
+      console.log("marketOracle ", marketOracleAddress);
+      console.log("troveManagerAddress", troveManagerAddress);
+      console.log("borrowerOperationsAddress", borrowerOperationsAddress);
+      console.log("--------------------------------");
+      console.log("relayer addresses before setting");
+      console.log("--------------------------------");
+      console.log("parControl", await relayer.parControl());
+      console.log("rateControl", await relayer.rateControl());
+      console.log("marketOracle", await relayer.marketOracle());
+      console.log("troveManager", await relayer.troveManager());
+      console.log("borrowerOperations", await relayer.borrowerOperations());
+      console.log("--------------------------------");
+    }
+
+    await relayer.setAddresses(
+      parControlAddress,
+      rateControlAddress,
+      marketOracleAddress,
+      troveManagerAddress,
+      borrowerOperationsAddress
+    );
+
+    await coreContracts.parControl.setAddresses(coreContracts.relayer.address); // new
+    await coreContracts.rateControl.setAddresses(coreContracts.relayer.address); // new
+
+    await rdOracle.setRelayer(coreContracts.relayer.address);
+
+    if (showLogs) {
+      console.log("--------------------------------");
+      console.log("relayer addresses after setting");
+      console.log("--------------------------------");
+      console.log("parControl", await relayer.parControl());
+      console.log("rateControl", await relayer.rateControl());
+      console.log("marketOracle", await relayer.marketOracle());
+      console.log("troveManager", await relayer.troveManager());
+      console.log("borrowerOperations", await relayer.borrowerOperations());
+      console.log("--------------------------------");
+    }
+  }
+
   function getRandomTokenPair() {
     const tokens = [
       { token: RD, symbol: "RD", decimals: RD_DECIMALS },
@@ -820,6 +888,7 @@ contract("RDOracle", async accounts => {
     console.log("Step 1: Creating mock tokens...");
     await createMockTokens(false);
 
+    // Step 2: Set up Balancer contracts
     console.log("Step 2: Setting up Balancer contracts...");
     await setupBalancerContracts(false);
 
@@ -827,28 +896,42 @@ contract("RDOracle", async accounts => {
     console.log("Step 3: Creating oracle...");
     await createOracle(false);
 
-    // Step 4: Create the pool
-    console.log("Step 4: Creating pool...");
+    // Step 4: Deploy core protocol
+    console.log("Step 4: Deploying core protocol...");
+    await deployCoreProtocol(false);
+
+    // Step 5: Set the relayer address
+    console.log("Step 5: Setup Relayer and Oracle...");
+    await setupRelayerAndOracle(false);
+
+    // Step 6: Create the pool
+    console.log("Step 6: Creating pool...");
     await createPool(false);
 
-    // Step 5: Initialize the pool
-    console.log("Step 5: Initializing pool...");
+    // Step 7: Initialize the pool
+    console.log("Step 7: Initializing pool...");
     await initializePool(false);
 
-    // Step 6: Increase observation cardinality
-    console.log("Step 6: Increasing observation cardinality...");
+    // Step 8: Increase observation cardinality
+    console.log("Step 8: Increasing observation cardinality...");
     await increaseObservationCardinality(rdOracle, 100);
 
-    // Step 7: Build observation history
-    console.log("Step 7: Building observation history...");
+    // Step 9: Build observation history
+    console.log("Step 9: Building observation history...");
     await buildObservationHistorySmall(true);
 
-    // Step 9: Execute large swaps
-    console.log("Step 9: Executing large swaps...");
+    // Step 11: Execute large swaps
+    console.log("Step 11: Executing large swaps...");
     await executeLargeSwaps();
   });
 
-  describe("RDOracle Initialization", () => {
+  // describe("Protocol Deployment", () => {
+  //   it("should deploy the protocol", async () => {
+  //     console.log("Deploying protocol...");
+  //   });
+  // });
+
+  describe("RDOracle Initialization and Setup", () => {
     it("should initialize with correct parameters", async () => {
       // Check vault address
       expect(await rdOracle.vault()).to.equal(vault.address);
@@ -988,6 +1071,11 @@ contract("RDOracle", async accounts => {
         "Oracle_StablecoinBasketZeroAddress()"
       );
     });
+
+    it("should set the relayer address", async () => {
+      await rdOracle.setRelayer(relayer.address);
+      expect(await rdOracle.relayer()).to.equal(relayer.address);
+    });
   });
 
   describe("RDOracle cardinality", async () => {
@@ -997,6 +1085,42 @@ contract("RDOracle", async accounts => {
       await increaseObservationCardinality(rdOracle, 125);
       const afterState = await rdOracle.oracleState();
       expect(afterState.observationCardinalityNext).to.be.bignumber.equal(new BN(125));
+    });
+  });
+
+  describe("Balancer Pool Hook Functionality (Relayer Integration)", async () => {
+    it("should call updatePar and upateRate on the relayer", async () => {
+      try {
+        const swapTx = await executeSwap({
+          signer: ethersSigner,
+          newPoolAddress,
+          _amountIn: "11",
+          _minAmountOut: "1",
+          tokenIn: RD,
+          tokenOut: USDC,
+          tokenInDecimals: RD_DECIMALS,
+          tokenOutDecimals: USDC_DECIMALS
+        });
+
+        const receipt = await web3.eth.getTransactionReceipt(swapTx.tx);
+        const relayerEvents = receipt.logs.filter(
+          log => log.address.toLowerCase() === relayer.address.toLowerCase()
+        );
+        expect(relayerEvents.length).to.be.equal(2);
+
+        const updateParEvent = relayerEvents.find(
+          event => event.topics[0] === web3.utils.sha3("ParUpdated(int256,int256,int256,int256)")
+        );
+        const updateRateEvent = relayerEvents.find(
+          event => event.topics[0] === web3.utils.sha3("RateUpdated(int256,int256,int256,int256)")
+        );
+
+        expect(updateParEvent).to.not.be.null;
+        expect(updateRateEvent).to.not.be.null;
+      } catch (e) {
+        console.error("Error during updatePar and updateRate:", e);
+        throw e;
+      }
     });
   });
 

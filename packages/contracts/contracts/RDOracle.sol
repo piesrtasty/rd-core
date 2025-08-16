@@ -19,12 +19,15 @@ import {StablePool, Rounding} from "./Vendor/@balancer-labs/v3-pool-stable/contr
 import {Oracle} from "./Vendor/@uniswap/v3-core/contracts/libraries/Oracle.sol";
 import {TickMath} from "./Vendor/@uniswap/v3-core/contracts/libraries/TickMath.sol";
 
+import {IRelayer} from "./v0.8.24/Interfaces/IRelayer.sol";
+import {Ownable} from "./v0.8.24/Dependencies/Ownable.sol";
+
 import {IRDOracle} from "./Interfaces/IRDOracle.sol";
 
 // Note: If > 50% of tokens in pool are yield bearing must use rate provider for token
 //  https://docs.balancer.fi/partner-onboarding/onboarding-overview/rate-providers.html
 
-contract RDOracle is IRDOracle, BaseHooks, VaultGuard {
+contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable {
     using FixedPoint for uint256;
     using Math for uint256;
     using Arrays for uint256[];
@@ -55,6 +58,9 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard {
 
     /// @inheritdoc IRDOracle
     address public rdToken;
+
+    /// @inheritdoc IRDOracle
+    address public relayer;
 
     address[] internal _stablecoinBasket;
 
@@ -276,25 +282,52 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard {
             (, , , uint256[] memory _lastBalancesWad) = IVault(vault).getPoolTokenInfo(_pool);
             _updateSyntheticRDPrice(_lastBalancesWad);
         }
+
+        // Update the relayer - Rate control uses the fast TWAP, Par control uses the slow TWAP
+        (uint256 fastVal, bool fastOk, uint256 slowVal, bool slowOk) = this
+            .getFastSlowResultWithValidity();
+        if (fastOk && slowOk && relayer != address(0)) {
+            IRelayer(relayer).updateRateAndParWithMarket(fastVal, slowVal);
+        }
     }
 
     // --- Methods ---
 
     /// @inheritdoc IRDOracle
-    function getFastResultWithValidity() public view returns (uint256 _result, bool _validity) {
-        // If the pool doesn't have enough history return false
+    function setRelayer(address _relayer) external {
+        relayer = _relayer;
+    }
 
+    /// @inheritdoc IRDOracle
+    // function getFastResultWithValidity() public view returns (uint256 _result, bool _validity) {
+    //     // If the pool doesn't have enough history return false
+
+    //     uint32[] memory secondsAgos = new uint32[](2);
+    //     secondsAgos[0] = quotePeriodFast;
+    //     secondsAgos[1] = _MIN_PRICE_AGE;
+    //     (int56[] memory tickCumulatives, ) = this.observe(secondsAgos);
+    //     int56 tickCumulativesDelta = tickCumulatives[1] - tickCumulatives[0];
+    //     int24 arithmeticMeanTick = int24(
+    //         tickCumulativesDelta / int56(int32(quotePeriodFast - _MIN_PRICE_AGE))
+    //     );
+    //     uint160 sqrtPriceX96 = TickMath.getSqrtRatioAtTick(arithmeticMeanTick);
+    //     _result = _convertSqrtPriceX96ToPrice(sqrtPriceX96);
+    //     _validity = true;
+    // }
+
+    /// @inheritdoc IRDOracle
+    function getFastResultWithValidity() public view returns (uint256 _result, bool _validity) {
         uint32[] memory secondsAgos = new uint32[](2);
         secondsAgos[0] = quotePeriodFast;
         secondsAgos[1] = _MIN_PRICE_AGE;
-        (int56[] memory tickCumulatives, ) = this.observe(secondsAgos);
-        int56 tickCumulativesDelta = tickCumulatives[1] - tickCumulatives[0];
-        int24 arithmeticMeanTick = int24(
-            tickCumulativesDelta / int56(int32(quotePeriodFast - _MIN_PRICE_AGE))
-        );
-        uint160 sqrtPriceX96 = TickMath.getSqrtRatioAtTick(arithmeticMeanTick);
-        _result = _convertSqrtPriceX96ToPrice(sqrtPriceX96);
-        _validity = true;
+        try this.observe(secondsAgos) returns (int56[] memory tickCumulatives, uint160[] memory) {
+            int56 delta = tickCumulatives[1] - tickCumulatives[0];
+            int24 meanTick = int24(delta / int56(int32(quotePeriodFast - _MIN_PRICE_AGE)));
+            uint160 sqrtPriceX96 = TickMath.getSqrtRatioAtTick(meanTick);
+            return (_convertSqrtPriceX96ToPrice(sqrtPriceX96), true);
+        } catch {
+            return (0, false);
+        }
     }
 
     /// @inheritdoc IRDOracle
@@ -307,20 +340,35 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard {
     }
 
     /// @inheritdoc IRDOracle
-    function getSlowResultWithValidity() public view returns (uint256 _result, bool _validity) {
-        // If the pool doesn't have enough history return false
+    // function getSlowResultWithValidity() public view returns (uint256 _result, bool _validity) {
+    //     // If the pool doesn't have enough history return false
 
+    //     uint32[] memory secondsAgos = new uint32[](2);
+    //     secondsAgos[0] = quotePeriodSlow;
+    //     secondsAgos[1] = _MIN_PRICE_AGE;
+    //     (int56[] memory tickCumulatives, ) = this.observe(secondsAgos);
+    //     int56 tickCumulativesDelta = tickCumulatives[1] - tickCumulatives[0];
+    //     int24 arithmeticMeanTick = int24(
+    //         tickCumulativesDelta / int56(int32(quotePeriodSlow - _MIN_PRICE_AGE))
+    //     );
+    //     uint160 sqrtPriceX96 = TickMath.getSqrtRatioAtTick(arithmeticMeanTick);
+    //     _result = _convertSqrtPriceX96ToPrice(sqrtPriceX96);
+    //     _validity = true;
+    // }
+
+    /// @inheritdoc IRDOracle
+    function getSlowResultWithValidity() public view returns (uint256 _result, bool _validity) {
         uint32[] memory secondsAgos = new uint32[](2);
         secondsAgos[0] = quotePeriodSlow;
         secondsAgos[1] = _MIN_PRICE_AGE;
-        (int56[] memory tickCumulatives, ) = this.observe(secondsAgos);
-        int56 tickCumulativesDelta = tickCumulatives[1] - tickCumulatives[0];
-        int24 arithmeticMeanTick = int24(
-            tickCumulativesDelta / int56(int32(quotePeriodSlow - _MIN_PRICE_AGE))
-        );
-        uint160 sqrtPriceX96 = TickMath.getSqrtRatioAtTick(arithmeticMeanTick);
-        _result = _convertSqrtPriceX96ToPrice(sqrtPriceX96);
-        _validity = true;
+        try this.observe(secondsAgos) returns (int56[] memory tickCumulatives, uint160[] memory) {
+            int56 delta = tickCumulatives[1] - tickCumulatives[0];
+            int24 meanTick = int24(delta / int56(int32(quotePeriodSlow - _MIN_PRICE_AGE)));
+            uint160 sqrtPriceX96 = TickMath.getSqrtRatioAtTick(meanTick);
+            return (_convertSqrtPriceX96ToPrice(sqrtPriceX96), true);
+        } catch {
+            return (0, false);
+        }
     }
 
     /// @inheritdoc IRDOracle
