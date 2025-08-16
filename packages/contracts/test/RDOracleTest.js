@@ -925,12 +925,6 @@ contract("RDOracle", async accounts => {
     await executeLargeSwaps();
   });
 
-  // describe("Protocol Deployment", () => {
-  //   it("should deploy the protocol", async () => {
-  //     console.log("Deploying protocol...");
-  //   });
-  // });
-
   describe("RDOracle Initialization and Setup", () => {
     it("should initialize with correct parameters", async () => {
       // Check vault address
