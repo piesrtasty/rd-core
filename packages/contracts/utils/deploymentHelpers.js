@@ -1,5 +1,7 @@
+const { ethers } = require("hardhat")
 const SortedTroves = artifacts.require("./SortedTroves.sol")
 const TroveManager = artifacts.require("./TroveManager.sol")
+const Liquidations = artifacts.require("./Liquidations.sol")
 const PriceFeedTestnet = artifacts.require("./PriceFeedTestnet.sol")
 const LUSDToken = artifacts.require("./LUSDToken.sol")
 const ActivePool = artifacts.require("./ActivePool.sol");
@@ -8,12 +10,13 @@ const StabilityPool = artifacts.require("./StabilityPool.sol")
 const GasPool = artifacts.require("./GasPool.sol")
 const CollSurplusPool = artifacts.require("./CollSurplusPool.sol")
 const FunctionCaller = artifacts.require("./TestContracts/FunctionCaller.sol")
+const Aggregator = artifacts.require("./Aggregator.sol")
 const BorrowerOperations = artifacts.require("./BorrowerOperations.sol")
 const HintHelpers = artifacts.require("./HintHelpers.sol")
 const ParControl = artifacts.require("./ParControl.sol")
 const RateControl = artifacts.require("./RateControl.sol")
 const Relayer = artifacts.require("./Relayer.sol")
-const MarketOracleTestnet = artifacts.require("./MarketOracleTestnet.sol")
+const MarketOracleTestnet = artifacts.require("../TestContracts/MarketOracleTestnet.sol")
 
 const LQTYStaking = artifacts.require("./LQTYStaking.sol")
 const LQTYToken = artifacts.require("./LQTYToken.sol")
@@ -29,7 +32,9 @@ const ActivePoolTester = artifacts.require("./ActivePoolTester.sol")
 const DefaultPoolTester = artifacts.require("./DefaultPoolTester.sol")
 const LiquityMathTester = artifacts.require("./LiquityMathTester.sol")
 const BorrowerOperationsTester = artifacts.require("./BorrowerOperationsTester.sol")
+const LiquidationsTester = artifacts.require("./LiquidationsTester.sol")
 const TroveManagerTester = artifacts.require("./TroveManagerTester.sol")
+const AggregatorTester = artifacts.require("./AggregatorTester.sol")
 const LUSDTokenTester = artifacts.require("./LUSDTokenTester.sol")
 
 // Proxy scripts
@@ -50,6 +55,9 @@ const {
   LQTYStakingProxy
 } = require('../utils/proxyHelpers.js')
 
+/// TODO: test collateral token is temporary as we switch to erc20 collateral
+const CollateralToken = artifacts.require("./TestContracts/CollateralToken.sol")
+
 /* "Liquity core" consists of all contracts in the core Liquity system.
 
 LQTY contracts consist of only those contracts related to the LQTY Token:
@@ -64,6 +72,7 @@ const ZERO_ADDRESS = '0x' + '0'.repeat(40)
 const maxBytes32 = '0x' + 'f'.repeat(64)
 
 class DeploymentHelper {
+
 
   static async deployLiquityCore() {
     const cmdLineArgs = process.argv
@@ -88,9 +97,12 @@ class DeploymentHelper {
   }
 
   static async deployLiquityCoreHardhat() {
+    const collateralToken = await CollateralToken.new("Hardhat Collateral Token", "HCT")
     const priceFeedTestnet = await PriceFeedTestnet.new()
+    const aggregator = await Aggregator.new()
     const sortedTroves = await SortedTroves.new()
     const troveManager = await TroveManager.new()
+    const liquidations = await Liquidations.new()
     const activePool = await ActivePool.new()
     const stabilityPool = await StabilityPool.new()
     const gasPool = await GasPool.new()
@@ -101,6 +113,7 @@ class DeploymentHelper {
     const hintHelpers = await HintHelpers.new()
     const lusdToken = await LUSDToken.new(
       troveManager.address,
+      liquidations.address,
       stabilityPool.address,
       borrowerOperations.address
     )
@@ -109,12 +122,16 @@ class DeploymentHelper {
     const marketOracleTestnet = await MarketOracleTestnet.new()
     const parControl = await ParControl.new()
     const rateControl = await RateControl.new()
+    
 
+    CollateralToken.setAsDeployed(collateralToken)
     LUSDToken.setAsDeployed(lusdToken)
     DefaultPool.setAsDeployed(defaultPool)
     PriceFeedTestnet.setAsDeployed(priceFeedTestnet)
     SortedTroves.setAsDeployed(sortedTroves)
+    Aggregator.setAsDeployed(aggregator)
     TroveManager.setAsDeployed(troveManager)
+    Liquidations.setAsDeployed(liquidations)
     ActivePool.setAsDeployed(activePool)
     StabilityPool.setAsDeployed(stabilityPool)
     GasPool.setAsDeployed(gasPool)
@@ -126,12 +143,15 @@ class DeploymentHelper {
     MarketOracleTestnet.setAsDeployed(marketOracleTestnet)
     ParControl.setAsDeployed(parControl)
     RateControl.setAsDeployed(rateControl)
+    
 
     const coreContracts = {
       priceFeedTestnet,
       lusdToken,
       sortedTroves,
+      aggregator,
       troveManager,
+      liquidations,
       activePool,
       stabilityPool,
       gasPool,
@@ -143,18 +163,20 @@ class DeploymentHelper {
       relayer,
       marketOracleTestnet,
       parControl,
-      rateControl
+      rateControl,
+      collateralToken
     }
     return coreContracts
   }
 
   static async deployTesterContractsHardhat() {
     const testerContracts = {}
-
+    testerContracts.collateralToken = await CollateralToken.new("Test Collateral Token", "TCT")
     // Contract without testers (yet)
     testerContracts.priceFeedTestnet = await PriceFeedTestnet.new()
     testerContracts.sortedTroves = await SortedTroves.new()
     // Actual tester contracts
+    testerContracts.aggregator = await AggregatorTester.new()
     testerContracts.communityIssuance = await CommunityIssuanceTester.new()
     testerContracts.activePool = await ActivePoolTester.new()
     testerContracts.defaultPool = await DefaultPoolTester.new()
@@ -164,10 +186,12 @@ class DeploymentHelper {
     testerContracts.math = await LiquityMathTester.new()
     testerContracts.borrowerOperations = await BorrowerOperationsTester.new()
     testerContracts.troveManager = await TroveManagerTester.new()
+    testerContracts.liquidations = await LiquidationsTester.new()
     testerContracts.functionCaller = await FunctionCaller.new()
     testerContracts.hintHelpers = await HintHelpers.new()
     testerContracts.lusdToken =  await LUSDTokenTester.new(
       testerContracts.troveManager.address,
+      testerContracts.liquidations.address,
       testerContracts.stabilityPool.address,
       testerContracts.borrowerOperations.address
     )
@@ -176,6 +200,8 @@ class DeploymentHelper {
     testerContracts.marketOracleTestnet = await MarketOracleTestnet.new()
     testerContracts.rateControl = await RateControl.new()
     testerContracts.parControl = await ParControl.new()
+
+
 
     return testerContracts
   }
@@ -241,7 +267,9 @@ class DeploymentHelper {
   static async deployLiquityCoreTruffle() {
     const priceFeedTestnet = await PriceFeedTestnet.new()
     const sortedTroves = await SortedTroves.new()
+    const aggregator = await Aggregator.new()
     const troveManager = await TroveManager.new()
+    const liquidations = await Liquidations.new()
     const activePool = await ActivePool.new()
     const stabilityPool = await StabilityPool.new()
     const gasPool = await GasPool.new()
@@ -255,11 +283,15 @@ class DeploymentHelper {
       stabilityPool.address,
       borrowerOperations.address
     )
+    const collateralToken = await CollateralToken.new("Hardhat Collateral Token", "HCT")
+
     const coreContracts = {
       priceFeedTestnet,
       lusdToken,
       sortedTroves,
+      aggregator,
       troveManager,
+      liquidations,
       activePool,
       stabilityPool,
       gasPool,
@@ -267,7 +299,8 @@ class DeploymentHelper {
       collSurplusPool,
       functionCaller,
       borrowerOperations,
-      hintHelpers
+      hintHelpers,
+      collateralToken
     }
     return coreContracts
   }
@@ -300,6 +333,7 @@ class DeploymentHelper {
   static async deployLUSDToken(contracts) {
     contracts.lusdToken = await LUSDToken.new(
       contracts.troveManager.address,
+      contracts.liquidations.address,
       contracts.stabilityPool.address,
       contracts.borrowerOperations.address
     )
@@ -309,6 +343,7 @@ class DeploymentHelper {
   static async deployLUSDTokenTester(contracts) {
     contracts.lusdToken = await LUSDTokenTester.new(
       contracts.troveManager.address,
+      contracts.liquidations.address,
       contracts.stabilityPool.address,
       contracts.borrowerOperations.address
     )
@@ -319,11 +354,13 @@ class DeploymentHelper {
     const proxies = await buildUserProxies(users)
 
     const borrowerWrappersScript = await BorrowerWrappersScript.new(
+      contracts.collateralToken.address,
       contracts.borrowerOperations.address,
       contracts.troveManager.address,
       LQTYContracts.lqtyStaking.address,
       contracts.relayer.address
     )
+
     contracts.borrowerWrappers = new BorrowerWrappersProxy(owner, proxies, borrowerWrappersScript.address)
 
     const borrowerOperationsScript = await BorrowerOperationsScript.new(contracts.borrowerOperations.address)
@@ -361,22 +398,6 @@ class DeploymentHelper {
     await contracts.functionCaller.setTroveManagerAddress(contracts.troveManager.address)
     await contracts.functionCaller.setSortedTrovesAddress(contracts.sortedTroves.address)
 
-    // set contracts in the Trove Manager
-    await contracts.troveManager.setAddresses(
-      contracts.borrowerOperations.address,
-      contracts.activePool.address,
-      contracts.defaultPool.address,
-      contracts.stabilityPool.address,
-      contracts.gasPool.address,
-      contracts.collSurplusPool.address,
-      contracts.priceFeedTestnet.address,
-      contracts.lusdToken.address,
-      contracts.sortedTroves.address,
-      LQTYContracts.lqtyToken.address,
-      LQTYContracts.lqtyStaking.address,
-      contracts.relayer.address
-    )
-
     // set contracts in BorrowerOperations 
     await contracts.borrowerOperations.setAddresses(
       contracts.troveManager.address,
@@ -390,35 +411,80 @@ class DeploymentHelper {
       contracts.lusdToken.address,
       LQTYContracts.lqtyStaking.address,
       contracts.relayer.address,
+      contracts.collateralToken.address
+    )
+
+    await contracts.activePool.setAddresses(
+      contracts.liquidations.address,
+      contracts.borrowerOperations.address,
+      contracts.troveManager.address,
+      contracts.stabilityPool.address,
+      contracts.defaultPool.address,
+      contracts.collSurplusPool.address,
+      contracts.collateralToken.address
+    )
+    // set contracts in the Trove Manager
+    await contracts.troveManager.setAddresses(
+      contracts.aggregator.address,
+      contracts.liquidations.address,
+      contracts.borrowerOperations.address,
+      contracts.activePool.address,
+      contracts.defaultPool.address,
+      contracts.stabilityPool.address,
+      contracts.gasPool.address,
+      contracts.collSurplusPool.address,
+      contracts.priceFeedTestnet.address,
+      contracts.lusdToken.address,
+      contracts.sortedTroves.address,
+      LQTYContracts.lqtyToken.address,
+      LQTYContracts.lqtyStaking.address,
+      contracts.relayer.address,
+      contracts.collateralToken.address
+    )
+
+    // set contracts in the Liquidations
+    await contracts.liquidations.setAddresses(
+      contracts.troveManager.address,
+      contracts.borrowerOperations.address,
+      contracts.activePool.address,
+      contracts.defaultPool.address,
+      contracts.stabilityPool.address,
+      contracts.gasPool.address,
+      contracts.collSurplusPool.address,
+      contracts.priceFeedTestnet.address,
+      contracts.lusdToken.address,
+      contracts.sortedTroves.address,
+      LQTYContracts.lqtyToken.address,
+      LQTYContracts.lqtyStaking.address,
+      contracts.relayer.address,
     )
 
     // set contracts in the Pools
     await contracts.stabilityPool.setAddresses(
       contracts.borrowerOperations.address,
+      contracts.liquidations.address,
       contracts.troveManager.address,
       contracts.activePool.address,
       contracts.lusdToken.address,
       contracts.sortedTroves.address,
       contracts.priceFeedTestnet.address,
-      LQTYContracts.communityIssuance.address
-    )
-
-    await contracts.activePool.setAddresses(
-      contracts.borrowerOperations.address,
-      contracts.troveManager.address,
-      contracts.stabilityPool.address,
-      contracts.defaultPool.address
+      LQTYContracts.communityIssuance.address,
+      contracts.collateralToken.address
     )
 
     await contracts.defaultPool.setAddresses(
+      contracts.liquidations.address,
       contracts.troveManager.address,
       contracts.activePool.address,
+      contracts.collateralToken.address
     )
 
     await contracts.collSurplusPool.setAddresses(
       contracts.borrowerOperations.address,
+      contracts.liquidations.address,
       contracts.troveManager.address,
       contracts.activePool.address,
+      contracts.collateralToken.address
     )
 
     // set contracts in HintHelpers
@@ -443,6 +509,11 @@ class DeploymentHelper {
     await contracts.rateControl.setAddresses(
       contracts.relayer.address
     )
+
+    await contracts.aggregator.setAddresses(
+      contracts.troveManager.address,
+      contracts.lusdToken.address
+    )
   }
 
   static async connectLQTYContracts(LQTYContracts) {
@@ -456,7 +527,8 @@ class DeploymentHelper {
       coreContracts.lusdToken.address,
       coreContracts.troveManager.address, 
       coreContracts.borrowerOperations.address,
-      coreContracts.activePool.address
+      coreContracts.activePool.address,
+      coreContracts.collateralToken.address
     )
   
     await LQTYContracts.communityIssuance.setAddresses(

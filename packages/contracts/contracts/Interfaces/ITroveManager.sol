@@ -4,17 +4,20 @@ pragma solidity 0.6.11;
 
 import "./ILiquityBase.sol";
 import "./IStabilityPool.sol";
+import "./IActivePool.sol";
+import "./IDefaultPool.sol";
 import "./ILUSDToken.sol";
 import "./ILQTYToken.sol";
 import "./ILQTYStaking.sol";
 import "./IRelayer.sol";
-
+import "./ICollSurplusPool.sol";
 
 // Common interface for the Trove Manager.
 interface ITroveManager is ILiquityBase {
     
     // --- Events ---
 
+    event AggregatorAddressChanged(address _newAggregatorAddress);
     event BorrowerOperationsAddressChanged(address _newBorrowerOperationsAddress);
     event PriceFeedAddressChanged(address _newPriceFeedAddress);
     event LUSDTokenAddressChanged(address _newLUSDTokenAddress);
@@ -29,20 +32,24 @@ interface ITroveManager is ILiquityBase {
     event RelayerAddressChanged(address _relayerAddress);
 
     event Liquidation(uint _liquidatedDebt, uint _liquidatedColl, uint _collGasCompensation, uint _LUSDGasCompensation);
-    event Redemption(uint _attemptedLUSDAmount, uint _actualLUSDAmount, uint _ETHSent, uint _ETHFee);
+    event Redemption(uint _attemptedLUSDAmount, uint _actualLUSDAmount, uint _collateralSent, uint _collateralFee);
     event TroveUpdated(address indexed _borrower, uint _debt, uint _coll, uint stake, uint8 operation);
     event TroveLiquidated(address indexed _borrower, uint _debt, uint _coll, uint8 operation);
     event BaseRateUpdated(uint _baseRate);
     event LastFeeOpTimeUpdated(uint _lastFeeOpTime);
     event TotalStakesUpdated(uint _newTotalStakes);
     event SystemSnapshotsUpdated(uint _totalStakesSnapshot, uint _totalCollateralSnapshot);
-    event LTermsUpdated(uint _L_ETH, uint _L_LUSDDebt);
-    event TroveSnapshotsUpdated(uint _L_ETH, uint _L_LUSDDebt);
+    event LTermsUpdated(uint _L_COLL, uint _L_LUSDDebt);
+    event TroveSnapshotsUpdated(uint _L_COLL, uint _L_LUSDDebt);
     event TroveIndexUpdated(address _borrower, uint _newIndex);
+
+    event AccInterestRateUpdated(uint256 rate);
 
     // --- Functions ---
 
     function setAddresses(
+        address _aggregatorAddress,
+        address _liquidationsAddress,
         address _borrowerOperationsAddress,
         address _activePoolAddress,
         address _defaultPoolAddress,
@@ -54,9 +61,11 @@ interface ITroveManager is ILiquityBase {
         address _sortedTrovesAddress,
         address _lqtyTokenAddress,
         address _lqtyStakingAddress,
-        address _relayerAddress
+        address _relayerAddress,
+        address _collateralTokenAddress
     ) external;
 
+    function collSurplusPool() external view returns (ICollSurplusPool);
     function stabilityPool() external view returns (IStabilityPool);
     function lusdToken() external view returns (ILUSDToken);
     function lqtyToken() external view returns (ILQTYToken);
@@ -69,13 +78,12 @@ interface ITroveManager is ILiquityBase {
     function getTroveFromTroveOwnersArray(uint _index) external view returns (address);
 
     function getNominalICR(address _borrower) external view returns (uint);
+
     function getCurrentICR(address _borrower, uint _price) external view returns (uint);
 
-    function liquidate(address _borrower) external;
+    function redistributeDebtAndColl(uint _debt, uint _coll) external;
 
-    function liquidateTroves(uint _n) external;
-
-    function batchLiquidate(address[] calldata _troveArray) external;
+    function updateSystemSnapshots_excludeCollRemainder(uint _collRemainder) external;
 
     function redeemCollateral(
         uint _LUSDAmount,
@@ -95,7 +103,9 @@ interface ITroveManager is ILiquityBase {
 
     function applyPendingRewards(address _borrower) external;
 
-    function getPendingETHReward(address _borrower) external view returns (uint);
+    function getPendingCollateralReward(address _borrower) external view returns (uint);
+
+    function movePendingTroveRewardsToActivePool(IActivePool _activePool, IDefaultPool _defaultPool, uint _debt, uint _coll) external;
 
     function getPendingLUSDDebtReward(address _borrower) external view returns (uint);
 
@@ -107,27 +117,16 @@ interface ITroveManager is ILiquityBase {
         uint debt, 
         uint coll, 
         uint pendingLUSDDebtReward, 
-        uint pendingETHReward
+        uint pendingCollateralReward
     );
 
     function drip() external;
 
     function closeTrove(address _borrower) external;
 
+    function closeTroveLiquidation(address _borrower) external;
+
     function removeStake(address _borrower) external;
-
-    function getRedemptionRate() external view returns (uint);
-    function getRedemptionRateWithDecay() external view returns (uint);
-
-    function getRedemptionFeeWithDecay(uint _ETHDrawn) external view returns (uint);
-
-    //function getBorrowingRate() external view returns (uint);
-    //function getBorrowingRateWithDecay() external view returns (uint);
-
-    //function getBorrowingFee(uint LUSDDebt) external view returns (uint);
-    //function getBorrowingFeeWithDecay(uint _LUSDDebt) external view returns (uint);
-
-    //function decayBaseRateFromBorrowing() external;
 
     function getTroveStatus(address _borrower) external view returns (uint);
     
@@ -138,6 +137,8 @@ interface ITroveManager is ILiquityBase {
     function getTroveActualDebt(address _borrower) external view returns (uint);
 
     function getTroveColl(address _borrower) external view returns (uint);
+
+    function getTroveDebtAndColl(address _borrower) external view returns (uint, uint);
 
     function setTroveStatus(address _borrower, uint num) external;
 

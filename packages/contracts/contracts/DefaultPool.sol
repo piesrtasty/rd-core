@@ -7,7 +7,8 @@ import "./Dependencies/SafeMath.sol";
 import "./Dependencies/Ownable.sol";
 import "./Dependencies/CheckContract.sol";
 import "./Dependencies/console.sol";
-
+import "./Dependencies/IERC20.sol";
+import "./Interfaces/IActivePool.sol";
 /*
  * The Default Pool holds the ETH and LUSD debt (but not LUSD tokens) from liquidations that have been redistributed
  * to active troves but not yet "applied", i.e. not yet recorded on a recipient active trove's struct.
@@ -20,30 +21,41 @@ contract DefaultPool is Ownable, CheckContract, IDefaultPool {
 
     string constant public NAME = "DefaultPool";
 
+    IERC20 public collateralToken;
+    address public liquidationsAddress;
     address public troveManagerAddress;
     address public activePoolAddress;
-    uint256 internal ETH;  // deposited ETH tracker
+    uint256 internal CT;  // deposited Collateral Token tracker
     uint256 internal LUSDDebt;  // debt
 
     event TroveManagerAddressChanged(address _newTroveManagerAddress);
     event DefaultPoolLUSDDebtUpdated(uint _LUSDDebt);
-    event DefaultPoolETHBalanceUpdated(uint _ETH);
+    event DefaultPoolCollateralBalanceUpdated(uint _COLLATERAL);
 
     // --- Dependency setters ---
 
     function setAddresses(
+        address _liquidationsAddress,
         address _troveManagerAddress,
-        address _activePoolAddress
+        address _activePoolAddress,
+        address _collateralTokenAddress
     )
         external
         onlyOwner
     {
+        checkContract(_collateralTokenAddress);
+        checkContract(_liquidationsAddress);
         checkContract(_troveManagerAddress);
         checkContract(_activePoolAddress);
 
+        collateralToken = IERC20(_collateralTokenAddress);
+        liquidationsAddress = _liquidationsAddress;
         troveManagerAddress = _troveManagerAddress;
         activePoolAddress = _activePoolAddress;
 
+        checkContract(address(collateralToken));
+
+        emit LiquidationsAddressChanged(_liquidationsAddress);
         emit TroveManagerAddressChanged(_troveManagerAddress);
         emit ActivePoolAddressChanged(_activePoolAddress);
 
@@ -53,12 +65,12 @@ contract DefaultPool is Ownable, CheckContract, IDefaultPool {
     // --- Getters for public variables. Required by IPool interface ---
 
     /*
-    * Returns the ETH state variable.
+    * Returns the collateral state variable.
     *
-    * Not necessarily equal to the the contract's raw ETH balance - ether can be forcibly sent to contracts.
+    * Not necessarily equal to the the contract's raw collateral balance - collateral can be forcibly sent to contracts.
     */
-    function getETH() external view override returns (uint) {
-        return ETH;
+    function getCollateral() external view override returns (uint) {
+        return CT;
     }
 
     function getLUSDDebt() external view override returns (uint) {
@@ -67,15 +79,32 @@ contract DefaultPool is Ownable, CheckContract, IDefaultPool {
 
     // --- Pool functionality ---
 
-    function sendETHToActivePool(uint _amount) external override {
-        _requireCallerIsTroveManager();
-        address activePool = activePoolAddress; // cache to save an SLOAD
-        ETH = ETH.sub(_amount);
-        emit DefaultPoolETHBalanceUpdated(ETH);
-        emit EtherSent(activePool, _amount);
+    function sendCollateralToActivePool(uint _amount) external override {
+        _requireCallerIsTMorLiquidations();
+        if (_amount > 0) {
+        IActivePool activePool = IActivePool(activePoolAddress);
+        CT = CT.sub(_amount);
+        emit DefaultPoolCollateralBalanceUpdated(CT);
+        emit CollateralSent(activePoolAddress, _amount);
+        
+        // transfer collateral to active pool
+        collateralToken.transfer(activePoolAddress, _amount);
+        // process collateral increase
+        activePool.processCollateralIncrease(_amount);
+        }
+    }
 
-        (bool success, ) = activePool.call{ value: _amount }("");
-        require(success, "DefaultPool: sending ETH failed");
+    function addCollateral(address _account, uint _amount) external override {
+        _requireCallerIsTroveMorActivePool();
+        CT = CT.add(_amount);
+        emit DefaultPoolCollateralBalanceUpdated(CT);
+        collateralToken.transferFrom(_account, address(this), _amount);
+    }
+
+    function processCollateralIncrease(uint _amount) external override {
+        _requireCallerIsTroveMorActivePool();
+        CT = CT.add(_amount);
+        emit DefaultPoolCollateralBalanceUpdated(CT);
     }
 
     function increaseLUSDDebt(uint _amount) external override {
@@ -85,6 +114,7 @@ contract DefaultPool is Ownable, CheckContract, IDefaultPool {
     }
 
     function decreaseLUSDDebt(uint _amount) external override {
+        //_requireCallerIsLiquidations();
         _requireCallerIsTroveManager();
         LUSDDebt = LUSDDebt.sub(_amount);
         emit DefaultPoolLUSDDebtUpdated(LUSDDebt);
@@ -100,11 +130,17 @@ contract DefaultPool is Ownable, CheckContract, IDefaultPool {
         require(msg.sender == troveManagerAddress, "DefaultPool: Caller is not the TroveManager");
     }
 
-    // --- Fallback function ---
-
-    receive() external payable {
-        _requireCallerIsActivePool();
-        ETH = ETH.add(msg.value);
-        emit DefaultPoolETHBalanceUpdated(ETH);
+    function _requireCallerIsTMorLiquidations() internal view {
+        require(msg.sender == troveManagerAddress || 
+               msg.sender == liquidationsAddress,
+                "DefaultPool: Caller is not TM or Liquidations");
     }
+
+    function _requireCallerIsTroveMorActivePool() internal view {
+        require(
+            msg.sender == troveManagerAddress ||
+            msg.sender == activePoolAddress,
+            "DefaultPool: Caller is neither TM nor ActivePool");
+    }
+
 }

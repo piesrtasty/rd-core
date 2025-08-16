@@ -193,9 +193,20 @@ class TestHelper {
     return gas
   }
 
-  static applyLiquidationFee(ethAmount) {
-    return ethAmount.mul(this.toBN(this.dec(995, 15))).div(MoneyValues._1e18BN)
+  static ethUsed(tx) {
+    const gas = this.toBN(tx.receipt.gasUsed)
+    const gasPrice = this.toBN(tx.receipt.effectiveGasPrice)
+
+    return gas.mul(gasPrice)
   }
+
+  static applyLiquidationFee(ethAmount) {
+    // just the gas compensation fee, not the penalty
+    return ethAmount.mul(this.toBN(this.dec(995, 15))).div(MoneyValues._1e18BN)
+    // const divided = ethAmount.div(this.toBN(200))
+    // return ethAmount.sub(divided)
+  }
+
   // --- Logging functions ---
 
   static logGasMetrics(gasResults, message) {
@@ -321,6 +332,22 @@ class TestHelper {
     return issuedDebt
   }
 
+  static async getCollateralFromCollSurplusPool(contracts, account) {
+    const rawHex = await web3.eth.call({
+      to: contracts.collSurplusPool.address,
+      data: contracts.collSurplusPool.contract.methods.getCollateral(account).encodeABI()
+    });
+    return this.toBN(rawHex)
+  }
+
+  static async getNominalICR(contracts, account) {
+    const rawHex = await web3.eth.call({
+      to: contracts.troveManager.address,
+      data: contracts.troveManager.contract.methods.getNominalICR(account).encodeABI()
+    });
+    return this.toBN(rawHex)
+  }
+
   // Adds the gas compensation (50 LUSD)
   static async getCompositeDebt(contracts, debt) {
     const compositeDebt = contracts.borrowerOperations.getCompositeDebt(debt)
@@ -336,6 +363,23 @@ class TestHelper {
     //return this.toBN((await contracts.troveManager.getEntireDebtAndColl(trove))[0])
     //return this.toBN(await contracts.troveManager.getTroveActualDebt(trove))
     //return await contracts.troveManager.getTroveActualDebt(trove)
+  }
+
+  static async mintCollateralTokens(contracts, accounts, amount) {  
+    for (const account of accounts) {
+      await contracts.collateralToken.mint(account, amount)
+    }
+  }
+
+  static async approveCollateralTokens(contracts, accounts, amount) {
+    for (const account of accounts) {
+      await contracts.collateralToken.approve(contracts.activePool.address, amount, { from: account })
+    }
+  }
+
+  static async mintCollateralTokensAndApproveActivePool(contracts, accounts, amount) {
+    await this.mintCollateralTokens(contracts, accounts, amount)
+    await this.approveCollateralTokens(contracts, accounts, amount)
   }
 
   static async getTroveStake(contracts, trove) {
@@ -401,15 +445,15 @@ class TestHelper {
         const LUSDAmount = redemptionTx.logs[i].args[0]
         const totalLUSDRedeemed = redemptionTx.logs[i].args[1]
         //const totalNLUSDRedeemed = redemptionTx.logs[i].args[2]
-        const totalETHDrawn = redemptionTx.logs[i].args[2]
-        const ETHFee = redemptionTx.logs[i].args[3]
+        const totalCollateralDrawn = redemptionTx.logs[i].args[2]
+        const CollateralFee = redemptionTx.logs[i].args[3]
 
-        return [LUSDAmount, totalLUSDRedeemed, totalETHDrawn, ETHFee]
+        return [LUSDAmount, totalLUSDRedeemed, totalCollateralDrawn, CollateralFee]
       }
     }
     throw ("The transaction logs do not contain a redemption event")
   }
-  static getEmittedDripValues(tx) {
+  static getEmittedDripValuesOld(tx) {
     for (let i = 0; i < tx.logs.length; i++) {
       if (tx.logs[i].event === "Drip") {
 
@@ -420,6 +464,25 @@ class TestHelper {
       }
     }
     throw ("The transaction logs do not contain a drip event")
+  }
+  static async getEmittedDripValues(contracts, tx) {
+    const troveManagerInterface = (await ethers.getContractAt("TroveManager", contracts.troveManager.address)).interface;
+    const spPayment = this.toBN(await this.getRawEventArgByName(tx, troveManagerInterface, contracts.troveManager.address, "Drip", "_spInterest"))
+    const stakePayment = this.toBN(await this.getRawEventArgByName(tx, troveManagerInterface, contracts.troveManager.address, "Drip", "_stakeInterest"))
+    return [stakePayment, spPayment]
+  }
+
+  static getEmittedEtherSentValues(tx) {
+    for (let i = 0; i < tx.logs.length; i++) {
+      if (tx.logs[i].event === "EtherSent") {
+
+        const to = tx.logs[i].args[0]
+        const amount = tx.logs[i].args[1]
+
+        return [to, amount]
+      }
+    }
+    throw ("The transaction logs do not contain an EtherSent event")
   }
 
   static getEmittedParUpdateValues(updateTx) {
@@ -464,6 +527,32 @@ class TestHelper {
       }
     }
     throw ("The transaction logs do not contain a liquidation event")
+  }
+
+  static getMultipleEmittedLiquidationValues(tx, n) {
+    const debts = []
+    const colls = []
+    const gasComps = []
+    const lusdComps = []
+    for (let i = 0; i < tx.logs.length; i++) {
+      if (tx.logs[i].event === "Liquidation") {
+        const liquidatedDebt = tx.logs[i].args[0]
+        const liquidatedColl = tx.logs[i].args[1]
+        const collGasComp = tx.logs[i].args[2]
+        const lusdGasComp = tx.logs[i].args[3]
+
+        debts.push(liquidatedDebt)
+        colls.push(liquidatedColl)
+        gasComps.push(collGasComp)
+        lusdComps.push(lusdGasComp )
+      }
+    }
+
+    console.log("len", debts.length) 
+    if (debts.length != 3) {
+      throw (`The transaction logs do not contain ${n} liquidation events`)
+    }
+    return debt.concat(colls).concat(gasComps).concat(lusdComps)
   }
 
   static getEmittedPUpdated(pUpdatedTx) {
@@ -634,7 +723,7 @@ class TestHelper {
     // console.log(`account: ${account}`)
     const rawColl = (await contracts.troveManager.Troves(account))[1]
     const rawDebt = (await contracts.troveManager.Troves(account))[0]
-    const pendingETHReward = await contracts.troveManager.getPendingETHReward(account)
+    const pendingETHReward = await contracts.troveManager.getPendingCollateralReward(account)
     const pendingLUSDDebtReward = await contracts.troveManager.getPendingLUSDDebtReward(account)
     const entireColl = rawColl.add(pendingETHReward)
     const entireDebt = rawDebt.add(pendingLUSDDebtReward)
@@ -697,7 +786,7 @@ class TestHelper {
   static async depositorValuesAfterLiquidation(contracts, tx, startDeposits, totalDeposits = null) {
       // retursn eth *gains* concatenated with SP deposits
       // does *not* return final eth balance, ie sp.getDepositorGain()
-      const [,drip] = await this.getEmittedDripValues(tx)
+      const [,drip] = await this.getEmittedDripValues(contracts, tx)
       const stabilityPoolInterface = (await ethers.getContractAt("StabilityPool", contracts.stabilityPool.address)).interface;
       var collToAdd = this.toBN(await this.getRawEventArgByName(tx, stabilityPoolInterface, contracts.stabilityPool.address, "Offset", "collToAdd"))
       var debtToOffset = this.toBN(await this.getRawEventArgByName(tx, stabilityPoolInterface, contracts.stabilityPool.address, "Offset", "debtToOffset"))
@@ -810,7 +899,7 @@ class TestHelper {
   }
 
   static async ethGainsAfterLiquidation(contracts, tx, startDeposits, totalDeposits = null) {
-      const [,drip] = await this.getEmittedDripValues(tx)
+      const [,drip] = await this.getEmittedDripValues(contracts, tx)
       const stabilityPoolInterface = (await ethers.getContractAt("StabilityPool", contracts.stabilityPool.address)).interface;
       var collToAdd = this.toBN(await this.getRawEventArgByName(tx, stabilityPoolInterface, contracts.stabilityPool.address, "Offset", "collToAdd"))
       var debtToOffset = this.toBN(await this.getRawEventArgByName(tx, stabilityPoolInterface, contracts.stabilityPool.address, "Offset", "debtToOffset"))
@@ -902,7 +991,7 @@ class TestHelper {
   }
 
   static async depositsAfterLiquidation(contracts, tx, startDeposits, totalDeposits = null) {
-      const [,drip] = await this.getEmittedDripValues(tx)
+      const [,drip] = await this.getEmittedDripValues(contracts, tx)
       const stabilityPoolInterface = (await ethers.getContractAt("StabilityPool", contracts.stabilityPool.address)).interface;
       var offsetDebt = this.toBN(await this.getRawEventArgByName(tx, stabilityPoolInterface, contracts.stabilityPool.address, "Offset", "debtToOffset"))
 
@@ -981,7 +1070,9 @@ class TestHelper {
       // In liquidate() there are two P updates
       // first for drip, then for offset
       
-      const [,drip] = await this.getEmittedDripValues(tx)
+      //const [,drip] = await this.getEmittedDripValues(tx)
+      const troveManagerInterface = (await ethers.getContractAt("TroveManager", contracts.troveManager.address)).interface;
+      const drip = this.toBN(await this.getRawEventArgByName(tx, troveManagerInterface, contracts.troveManager.address, "Drip", "_spInterest"))
       const stabilityPoolInterface = (await ethers.getContractAt("StabilityPool", contracts.stabilityPool.address)).interface;
       var offsetDebt = this.toBN(await this.getRawEventArgByName(tx, stabilityPoolInterface, contracts.stabilityPool.address, "Offset", "debtToOffset"))
 
@@ -1161,7 +1252,7 @@ class TestHelper {
     // netDebt = totalDebt - gas_comp
     //const netDebt = await this.getActualDebtFromComposite(totalDebt, contracts)
     const netDebt = lusdAmount
-
+    let collateralAmount;
     if (ICR) {
       const par = await contracts.relayer.par()
       const price = await contracts.priceFeedTestnet.getPrice()
@@ -1173,8 +1264,15 @@ class TestHelper {
           extraParams.value = extraParams.value.add(this.toBN('1'))
       }
     }
-    
-    const tx = await contracts.borrowerOperations.openTrove(lusdAmount, upperHint, lowerHint, extraParams)
+    collateralAmount = extraParams.value;
+    // Approve ERC20 tokens instead of sending ETH
+  await contracts.collateralToken.approve(
+    contracts.activePool.address, 
+    collateralAmount, 
+    { from: extraParams.from }
+  )
+
+    const tx = await contracts.borrowerOperations.openTrove(collateralAmount, lusdAmount, upperHint, lowerHint, { from: extraParams.from})
 
     return {
       lusdAmount,
@@ -1292,7 +1390,7 @@ class TestHelper {
       const { newColl, newDebt } = await this.getCollAndDebtFromAddColl(contracts, account, amount)
       const {upperHint, lowerHint} = await this.getBorrowerOpsListHint(contracts, newColl, newDebt)
 
-      const tx = await contracts.borrowerOperations.addColl(upperHint, lowerHint, { from: account, value: amount })
+      const tx = await contracts.borrowerOperations.addColl(amount, upperHint, lowerHint, { from: account })
       const gas = this.gasUsed(tx)
       gasCostList.push(gas)
     }
@@ -1306,8 +1404,9 @@ class TestHelper {
 
       const { newColl, newDebt } = await this.getCollAndDebtFromAddColl(contracts, account, randCollAmount)
       const {upperHint, lowerHint} = await this.getBorrowerOpsListHint(contracts, newColl, newDebt)
-
-      const tx = await contracts.borrowerOperations.addColl(upperHint, lowerHint, { from: account, value: randCollAmount })
+      // approve coll transfer
+      await contracts.collateralToken.approve(contracts.activePool.address, randCollAmount, { from: account})
+      const tx = await contracts.borrowerOperations.addColl(randCollAmount, upperHint, lowerHint, { from: account})
       const gas = this.gasUsed(tx)
       gasCostList.push(gas)
     }
@@ -1452,7 +1551,6 @@ class TestHelper {
   }
   static async performRedemptionTx(redeemer, price, contracts, LUSDAmount, maxFee = 0, gasPrice_toUse = 0) {
     const redemptionhint = await contracts.hintHelpers.getRedemptionHints(LUSDAmount, price, gasPrice_toUse)
-
     const firstRedemptionHint = redemptionhint[0]
     const partialRedemptionNewICR = redemptionhint[1]
     //console.log("partialRedemptionNewICR", partialRedemptionNewICR.toString())
@@ -1537,18 +1635,18 @@ class TestHelper {
     return this.getGasMetrics(gasCostList)
   }
 
-  static async withdrawETHGainToTrove_allAccounts(accounts, contracts) {
+  static async withdrawCollateralGainToTrove_allAccounts(accounts, contracts) {
     const gasCostList = []
     for (const account of accounts) {
 
       let {entireColl, entireDebt } = await this.getEntireCollAndDebt(contracts, account)
       console.log(`entireColl: ${entireColl}`)
       console.log(`entireDebt: ${entireDebt}`)
-      const ETHGain = await contracts.stabilityPool.getDepositorETHGain(account)
+      const ETHGain = await contracts.stabilityPool.getDepositorCollateralGain(account)
       const newColl = entireColl.add(ETHGain)
       const {upperHint, lowerHint} = await this.getBorrowerOpsListHint(contracts, newColl, entireDebt)
 
-      const tx = await contracts.stabilityPool.withdrawETHGainToTrove(upperHint, lowerHint, { from: account })
+      const tx = await contracts.stabilityPool.withdrawCollateralGainToTrove(upperHint, lowerHint, { from: account })
       const gas = this.gasUsed(tx)
       gasCostList.push(gas)
     }

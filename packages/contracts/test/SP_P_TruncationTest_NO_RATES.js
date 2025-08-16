@@ -8,6 +8,7 @@ const dec = th.dec
 const toBN = th.toBN
 const getDifference = th.getDifference
 
+const LiquidationsTester = artifacts.require("LiquidationsTester")
 const TroveManagerTester = artifacts.require("TroveManagerTester")
 const LUSDToken = artifacts.require("LUSDToken")
 
@@ -26,10 +27,12 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
   let priceFeed
   let lusdToken
   let stabilityPool
+  let activePool
   let sortedTroves
   let troveManager
   let borrowerOperations
   let lqtyToken
+  let collateralToken
 
   const ZERO_ADDRESS = th.ZERO_ADDRESS
 
@@ -41,11 +44,13 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
   describe("Scale Factor issue tests", async () => {
     beforeEach(async () => {
       contracts = await deploymentHelper.deployLiquityCore()
+      contracts.liquidations = await LiquidationsTester.new()
       contracts.troveManager = await TroveManagerTester.new()
       contracts.rateControl = await RateControlTester.new()
       await contracts.rateControl.setCoBias(0)
       contracts.lusdToken = await LUSDToken.new(
         contracts.troveManager.address,
+        contracts.liquidations.address,
         contracts.stabilityPool.address,
         contracts.borrowerOperations.address
       )
@@ -55,11 +60,14 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
       priceFeed = contracts.priceFeedTestnet
       lusdToken = contracts.lusdToken
       stabilityPool = contracts.stabilityPool
+      activePool = contracts.activePool
       sortedTroves = contracts.sortedTroves
+      liquidations = contracts.liquidations
       troveManager = contracts.troveManager
       stabilityPool = contracts.stabilityPool
       borrowerOperations = contracts.borrowerOperations
       lqtyToken = LQTYContracts.lqtyToken
+      collateralToken = contracts.collateralToken
 
       await deploymentHelper.connectLQTYContracts(LQTYContracts)
       await deploymentHelper.connectCoreContracts(contracts, LQTYContracts)
@@ -72,19 +80,25 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
       const kickbackRate_F2 = toBN(dec(80, 16)) // F2 kicks 80% back to depositor
       const kickbackRate_F3 = toBN(dec(1, 18)) // F2 kicks 100% back to depositor
 
+      await th.mintCollateralTokensAndApproveActivePool(contracts, [owner,
+        whale,
+        A, B, C, D, E, F, F1, F2, F3
+      ], dec(100, 24))
       await stabilityPool.registerFrontEnd(kickbackRate_F1, { from: F1 })
       await stabilityPool.registerFrontEnd(kickbackRate_F2, { from: F2 })
       await stabilityPool.registerFrontEnd(kickbackRate_F3, { from: F3 })
+
     })
  
   it("1. Liquidation succeeds after P reduced by a factor of 1e18", async () => {
     // Whale opens Trove with 1e8 ETH and sends 5e9 LUSD to A
-    await borrowerOperations.openTrove(await getOpenTroveLUSDAmount(dec(1e10, 18)), whale, whale, { from: whale, value: dec(1e8, 'ether') })
+    await borrowerOperations.openTrove(dec(1e8, 'ether'), await getOpenTroveLUSDAmount(dec(1e10, 18)), whale, whale, { from: whale })
     await lusdToken.transfer(A, dec(5e9, 18), {from: whale})
 
     // Open 3 Troves with 1e9 LUSD debt
     for (account of [A, B, C]) {
-      await borrowerOperations.openTrove(await getLUSDAmountForDesiredDebt(1e9), account, account, {from: account, value: dec(1e7, 'ether') })
+      await collateralToken.approve(activePool.address, dec(1e7, 'ether'), { from: account })
+      await borrowerOperations.openTrove(dec(1e7, 'ether'), await getLUSDAmountForDesiredDebt(1e9), account, account, {from: account })
       //assert.isTrue((await th.getTroveEntireDebt(contracts, account)).eq(th.toBN(dec(1e9, 18))))
       assert.isAtMost(th.getDifference(await th.getTroveEntireDebt(contracts, account), toBN(dec(1e9, 18))), 1)
     }
@@ -101,7 +115,7 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
 
     // Price drop -> liquidate Trove A -> price rises 
     await priceFeed.setPrice(dec(105, 18))
-    await troveManager.liquidate(A, { from: owner });
+    await liquidations.liquidate(A, { from: owner });
     assert.equal(await troveManager.getTroveStatus(A), 3) // status: closed by liq
     await priceFeed.setPrice(dec(200, 18))
 
@@ -118,7 +132,7 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
 
      // Price drop -> liquidate Trove B -> price rises 
     await priceFeed.setPrice(dec(105, 18))
-    await troveManager.liquidate(B, { from: owner });
+    await liquidations.liquidate(B, { from: owner });
     assert.equal(await troveManager.getTroveStatus(B), 3) // status: closed by liq
     await priceFeed.setPrice(dec(200, 18))
 
@@ -135,7 +149,7 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
 
     // Price drop -> liquidate Trove C -> price rises 
     await priceFeed.setPrice(dec(105, 18))
-    await troveManager.liquidate(C, { from: owner });
+    await liquidations.liquidate(C, { from: owner });
     assert.equal(await troveManager.getTroveStatus(C), 3) // status: closed by liq
     await priceFeed.setPrice(dec(200, 18))
 
@@ -145,12 +159,14 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
 
   it("2. New deposits can be made after P reduced by a factor of 1e18", async () => {
     // Whale opens Trove with 1e8 ETH and sends 5e9 LUSD to A
-    await borrowerOperations.openTrove(await getOpenTroveLUSDAmount(dec(1e10, 18)), whale, whale, { from: whale, value: dec(1e8, 'ether') })
+    await collateralToken.approve(activePool.address, dec(1e8, 'ether'), { from: whale })
+    await borrowerOperations.openTrove(dec(1e8, 'ether'), await getOpenTroveLUSDAmount(dec(1e10, 18)), whale, whale, { from: whale })
     await lusdToken.transfer(A, dec(5e9, 18), {from: whale})
 
     // Open 3 Troves with 1e9 LUSD debt
     for (account of [A, B, C]) {
-      await borrowerOperations.openTrove(await getLUSDAmountForDesiredDebt(1e9), account, account, {from: account, value: dec(1e7, 'ether') })
+      await collateralToken.approve(activePool.address, dec(1e7, 'ether'), { from: account })
+      await borrowerOperations.openTrove(dec(1e7, 'ether'), await getLUSDAmountForDesiredDebt(1e9), account, account, {from: account })
       //assert.isTrue((await th.getTroveEntireDebt(contracts, account)).eq(th.toBN(dec(1e9, 18))))
       assert.isAtMost(th.getDifference(await th.getTroveEntireDebt(contracts, account), toBN(dec(1e9, 18))), 1)
     }
@@ -166,7 +182,7 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
     
     // Price drop -> liquidate Trove A -> price rises 
     await priceFeed.setPrice(dec(105, 18))
-    await troveManager.liquidate(A, { from: owner });
+    await liquidations.liquidate(A, { from: owner });
     assert.equal(await troveManager.getTroveStatus(A), 3) // status: closed by liq
     await priceFeed.setPrice(dec(200, 18))
 
@@ -182,7 +198,7 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
 
      // Price drop -> liquidate Trove B -> price rises 
     await priceFeed.setPrice(dec(105, 18))
-    await troveManager.liquidate(B, { from: owner });
+    await liquidations.liquidate(B, { from: owner });
     assert.equal(await troveManager.getTroveStatus(B), 3) // status: closed by liq
     await priceFeed.setPrice(dec(200, 18))
 
@@ -210,12 +226,14 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
 
   it("3. Liquidation succeeds after P reduced by a factwor of 1e18 and liquidation has newProductFactor == 1e9", async () => {
     // Whale opens Trove with 1e8 ETH and sends 5e9 LUSD to A
-    await borrowerOperations.openTrove(await getOpenTroveLUSDAmount(dec(1e10, 18)), whale, whale, { from: whale, value: dec(1e8, 'ether') })
+    await collateralToken.approve(activePool.address, dec(1e8, 'ether'), { from: whale })
+    await borrowerOperations.openTrove(dec(1e8, 'ether'), await getOpenTroveLUSDAmount(dec(1e10, 18)), whale, whale, { from: whale })
     await lusdToken.transfer(A, dec(5e9, 18), {from: whale})
 
     // Open 3 Troves with 1e9 LUSD debt
     for (account of [A, B, C]) {
-      await borrowerOperations.openTrove(await getLUSDAmountForDesiredDebt(1e9), account, account, {from: account, value: dec(1e7, 'ether') })
+      await collateralToken.approve(activePool.address, dec(1e7, 'ether'), { from: account })
+      await borrowerOperations.openTrove(dec(1e7, 'ether'), await getLUSDAmountForDesiredDebt(1e9), account, account, {from: account })
       //assert.isTrue((await th.getTroveEntireDebt(contracts, account)).eq(th.toBN(dec(1e9, 18))))
       assert.isAtMost(th.getDifference(await th.getTroveEntireDebt(contracts, account), toBN(dec(1e9, 18))), 1)
     }
@@ -235,7 +253,7 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
     
     // Price drop -> liquidate Trove A -> price rises 
     await priceFeed.setPrice(dec(105, 18))
-    await troveManager.liquidate(A, { from: owner });
+    await liquidations.liquidate(A, { from: owner });
     // newProductFactor: 1000000000
     console.log("LIQ 1")
     assert.equal(await troveManager.getTroveStatus(A), 3) // status: closed by liq
@@ -257,7 +275,7 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
 
      // Price drop -> liquidate Trove B -> price rises 
     await priceFeed.setPrice(dec(105, 18))
-    await troveManager.liquidate(B, { from: owner });
+    await liquidations.liquidate(B, { from: owner });
     // newProductFactor: 1000000000
     console.log("LIQ 2")
     assert.equal(await troveManager.getTroveStatus(B), 3) // status: closed by liq
@@ -280,7 +298,7 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
 
     // Price drop -> liquidate Trove C -> price rises 
     await priceFeed.setPrice(dec(105, 18))
-    await troveManager.liquidate(C, { from: owner });
+    await liquidations.liquidate(C, { from: owner });
     // newProductFactor: 1000000000
     console.log("LIQ 3")
     assert.equal(await troveManager.getTroveStatus(C), 3) // status: closed by liq
@@ -300,12 +318,14 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
 
   it("4. Liquidation succeeds when P reduced by a factwor of 1e18 and liquidation has newProductFactor > 1e9", async () => {
     // Whale opens Trove with 1e8 ETH and sends 5e9 LUSD to A
-    await borrowerOperations.openTrove(await getOpenTroveLUSDAmount(dec(1e10, 18)), whale, whale, { from: whale, value: dec(1e8, 'ether') })
+    await collateralToken.approve(activePool.address, dec(1e8, 'ether'), { from: whale })
+    await borrowerOperations.openTrove(dec(1e8, 'ether'), await getOpenTroveLUSDAmount(dec(1e10, 18)), whale, whale, { from: whale })
     await lusdToken.transfer(A, dec(5e9, 18), {from: whale})
 
     // Open 3 Troves with 1e9 LUSD debt
     for (account of [A, B, C]) {
-      await borrowerOperations.openTrove(await getLUSDAmountForDesiredDebt(1e9), account, account, {from: account, value: dec(1e7, 'ether') })
+      await collateralToken.approve(activePool.address, dec(1e7, 'ether'), { from: account })
+      await borrowerOperations.openTrove(dec(1e7, 'ether'), await getLUSDAmountForDesiredDebt(1e9), account, account, {from: account })
       //assert.isTrue((await th.getTroveEntireDebt(contracts, account)).eq(th.toBN(dec(1e9, 18))))
       assert.isAtMost(th.getDifference(await th.getTroveEntireDebt(contracts, account), toBN(dec(1e9, 18))), 1)
     }
@@ -325,7 +345,7 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
     
     // Price drop -> liquidate Trove A -> price rises 
     await priceFeed.setPrice(dec(105, 18))
-    await troveManager.liquidate(A, { from: owner });
+    await liquidations.liquidate(A, { from: owner });
     // newProductFactor: 1000000000
     console.log("LIQ 1")
     assert.equal(await troveManager.getTroveStatus(A), 3) // status: closed by liq
@@ -347,7 +367,7 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
 
      // Price drop -> liquidate Trove B -> price rises 
     await priceFeed.setPrice(dec(105, 18))
-    await troveManager.liquidate(B, { from: owner });
+    await liquidations.liquidate(B, { from: owner });
     // newProductFactor: 1000000000
     console.log("LIQ 2")
     assert.equal(await troveManager.getTroveStatus(B), 3) // status: closed by liq
@@ -370,7 +390,7 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
 
     // Price drop -> liquidate Trove C -> price rises 
     await priceFeed.setPrice(dec(105, 18))
-    await troveManager.liquidate(C, { from: owner });
+    await liquidations.liquidate(C, { from: owner });
     // newProductFactor: 500000000500000000
     console.log("LIQ 3")
     assert.equal(await troveManager.getTroveStatus(C), 3) // status: closed by liq
@@ -392,12 +412,14 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
 
   it("5. Depositor have correct depleted stake after deposit when P reduced by a factwor of 1e18 and scale changing liq (with newProductFactor == 1e9)", async () => {
     // Whale opens Trove with 1e8 ETH and sends 5e9 LUSD to A
-    await borrowerOperations.openTrove(await getOpenTroveLUSDAmount(dec(1e10, 18)), whale, whale, { from: whale, value: dec(1e8, 'ether') })
+    await collateralToken.approve(activePool.address, dec(1e8, 'ether'), { from: whale })
+    await borrowerOperations.openTrove(dec(1e8, 'ether'), await getOpenTroveLUSDAmount(dec(1e10, 18)), whale, whale, { from: whale })
     await lusdToken.transfer(A, dec(5e9, 18), {from: whale})
 
     // Open 3 Troves with 1e9 LUSD debt
     for (account of [A, B, C]) {
-      await borrowerOperations.openTrove(await getLUSDAmountForDesiredDebt(1e9), account, account, {from: account, value: dec(1e7, 'ether') })
+      await collateralToken.approve(activePool.address, dec(1e7, 'ether'), { from: account })
+      await borrowerOperations.openTrove(dec(1e7, 'ether'), await getLUSDAmountForDesiredDebt(1e9), account, account, {from: account })
       //assert.isTrue((await th.getTroveEntireDebt(contracts, account)).eq(th.toBN(dec(1e9, 18))))
       assert.isAtMost(th.getDifference(await th.getTroveEntireDebt(contracts, account), toBN(dec(1e9, 18))), 1)
     }
@@ -417,7 +439,7 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
     
     // Price drop -> liquidate Trove A -> price rises 
     await priceFeed.setPrice(dec(105, 18))
-    await troveManager.liquidate(A, { from: owner });
+    await liquidations.liquidate(A, { from: owner });
     console.log("LIQ 1")
     assert.equal(await troveManager.getTroveStatus(A), 3) // status: closed by liq
     await priceFeed.setPrice(dec(200, 18))
@@ -438,7 +460,7 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
 
      // Price drop -> liquidate Trove B -> price rises 
     await priceFeed.setPrice(dec(105, 18))
-    await troveManager.liquidate(B, { from: owner });
+    await liquidations.liquidate(B, { from: owner });
     console.log("LIQ 2")
     assert.equal(await troveManager.getTroveStatus(B), 3) // status: closed by liq
     await priceFeed.setPrice(dec(200, 18))
@@ -465,7 +487,7 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
     
     // Price drop -> liquidate Trove C -> price rises 
     await priceFeed.setPrice(dec(105, 18))
-    await troveManager.liquidate(C, { from: owner });
+    await liquidations.liquidate(C, { from: owner });
     console.log("LIQ 3")
     assert.equal(await troveManager.getTroveStatus(C), 3) // status: closed by liq
     await priceFeed.setPrice(dec(200, 18))
@@ -490,12 +512,14 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
 
   it("6. Depositor have correct depleted stake after deposit when P reduced by a factwor of 1e18 and scale changing liq (with newProductFactor > 1e9)", async () => {
     // Whale opens Trove with 1e8 ETH and sends 5e9 LUSD to A
-    await borrowerOperations.openTrove(await getOpenTroveLUSDAmount(dec(1e10, 18)), whale, whale, { from: whale, value: dec(1e8, 'ether') })
+    await collateralToken.approve(activePool.address, dec(1e8, 'ether'), { from: whale })
+    await borrowerOperations.openTrove(dec(1e8, 'ether'), await getOpenTroveLUSDAmount(dec(1e10, 18)), whale, whale, { from: whale })
     await lusdToken.transfer(A, dec(5e9, 18), {from: whale})
 
     // Open 3 Troves with 1e9 LUSD debt
     for (account of [A, B, C]) {
-      await borrowerOperations.openTrove(await getLUSDAmountForDesiredDebt(1e9), account, account, {from: account, value: dec(1e7, 'ether') })
+      await collateralToken.approve(activePool.address, dec(1e7, 'ether'), { from: account })
+      await borrowerOperations.openTrove(dec(1e7, 'ether'), await getLUSDAmountForDesiredDebt(1e9), account, account, {from: account })
       //assert.isTrue((await th.getTroveEntireDebt(contracts, account)).eq(th.toBN(dec(1e9, 18))))
       assert.isAtMost(th.getDifference(await th.getTroveEntireDebt(contracts, account), toBN(dec(1e9, 18))), 1)
     }
@@ -515,7 +539,7 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
     
     // Price drop -> liquidate Trove A -> price rises 
     await priceFeed.setPrice(dec(105, 18))
-    await troveManager.liquidate(A, { from: owner });
+    await liquidations.liquidate(A, { from: owner });
     // newProductFactor: 1000000000
     console.log("LIQ 1")
     assert.equal(await troveManager.getTroveStatus(A), 3) // status: closed by liq
@@ -537,7 +561,7 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
 
      // Price drop -> liquidate Trove B -> price rises 
     await priceFeed.setPrice(dec(105, 18))
-    await troveManager.liquidate(B, { from: owner });
+    await liquidations.liquidate(B, { from: owner });
     // newProductFactor: 1000000000
     console.log("LIQ 2")
     assert.equal(await troveManager.getTroveStatus(B), 3) // status: closed by liq
@@ -565,7 +589,7 @@ contract('StabilityPool Scale Factor issue tests', async accounts => {
 
     // Price drop -> liquidate Trove C -> price rises 
     await priceFeed.setPrice(dec(105, 18))
-    await troveManager.liquidate(C, { from: owner });
+    await liquidations.liquidate(C, { from: owner });
     // newProductFactor: 500000000500000000
     console.log("LIQ 3")
     assert.equal(await troveManager.getTroveStatus(C), 3) // status: closed by liq
