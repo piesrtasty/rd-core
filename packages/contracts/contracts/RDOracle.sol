@@ -294,7 +294,7 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable {
     // --- Methods ---
 
     /// @inheritdoc IRDOracle
-    function setRelayer(address _relayer) external {
+    function setRelayer(address _relayer) external onlyOwner {
         relayer = _relayer;
     }
 
