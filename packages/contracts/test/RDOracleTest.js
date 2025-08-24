@@ -66,7 +66,8 @@ contract("RDOracle", async accounts => {
 
   const QUOTE_PERIOD_FAST = 300; // 5 minutes
   const QUOTE_PERIOD_SLOW = 900; // 15 minutes
-  const MIN_OBSERVATION_DELTA = 60; // 1 minute
+  // const MIN_OBSERVATION_DELTA = 60; // 1 minute
+  const BLOCK_TIME = 60; // 12 seconds
 
   const balv3StablePoolFactory = "0xB9d01CA61b9C181dA1051bFDd28e1097e920AB14";
   const balv3Vault = "0xbA1333333333a1BA1108E8412f11850A5C319bA9";
@@ -196,7 +197,6 @@ contract("RDOracle", async accounts => {
       console.log("QUOTE_PERIOD_FAST", QUOTE_PERIOD_FAST);
       console.log("QUOTE_PERIOD_SLOW", QUOTE_PERIOD_SLOW);
       console.log("stablecoins", stablecoins);
-      console.log("MIN_OBSERVATION_DELTA", MIN_OBSERVATION_DELTA);
     }
 
     const poolName = "RD-USDC-USDT-DAI";
@@ -570,25 +570,15 @@ contract("RDOracle", async accounts => {
       console.log("QUOTE_PERIOD_FAST:", QUOTE_PERIOD_FAST);
       console.log("QUOTE_PERIOD_SLOW:", QUOTE_PERIOD_SLOW);
       console.log("stablecoins:", stablecoins);
-      console.log("MIN_OBSERVATION_DELTA:", MIN_OBSERVATION_DELTA);
     }
 
     try {
-      // rdOracle = await RDOracle.new(
-      //   vault.address,
-      //   RDTAddress,
-      //   QUOTE_PERIOD_FAST,
-      //   QUOTE_PERIOD_SLOW,
-      //   stablecoins,
-      //   MIN_OBSERVATION_DELTA
-      // );
       rdOracle = await RDOracleTestHelper.new(
         vault.address,
         RDTAddress,
         QUOTE_PERIOD_FAST,
         QUOTE_PERIOD_SLOW,
-        stablecoins,
-        MIN_OBSERVATION_DELTA
+        stablecoins
       );
       if (showLogs) {
         console.log("Oracle created successfully:", rdOracle.address);
@@ -772,40 +762,40 @@ contract("RDOracle", async accounts => {
     }
   }
 
-  async function buildObservationHistoryFast(logSetup = false) {
-    const showLogs = logsOn && logSetup;
+  // async function buildObservationHistoryFast(logSetup = false) {
+  //   const showLogs = logsOn && logSetup;
 
-    // Just 5 swaps to establish basic history
-    const swapAmounts = [10000, 20000, 15000, 30000, 25000];
-    const timeInterval = 120; // Fixed interval
+  //   // Just 5 swaps to establish basic history
+  //   const swapAmounts = [10000, 20000, 15000, 30000, 25000];
+  //   const timeInterval = 120; // Fixed interval
 
-    for (let i = 0; i < swapAmounts.length; i++) {
-      try {
-        const { tokenIn, tokenOut } = getRandomTokenPair();
+  //   for (let i = 0; i < swapAmounts.length; i++) {
+  //     try {
+  //       const { tokenIn, tokenOut } = getRandomTokenPair();
 
-        // Single time increase
-        await time.increase(MIN_OBSERVATION_DELTA + timeInterval);
+  //       // Single time increase
+  //       await time.increase(MIN_OBSERVATION_DELTA + timeInterval);
 
-        await executeSwap({
-          signer: ethersSigner,
-          newPoolAddress,
-          _amountIn: swapAmounts[i].toString(),
-          _minAmountOut: "1",
-          tokenIn: tokenIn.token,
-          tokenOut: tokenOut.token,
-          tokenInDecimals: tokenIn.decimals,
-          tokenOutDecimals: tokenOut.decimals
-        });
+  //       await executeSwap({
+  //         signer: ethersSigner,
+  //         newPoolAddress,
+  //         _amountIn: swapAmounts[i].toString(),
+  //         _minAmountOut: "1",
+  //         tokenIn: tokenIn.token,
+  //         tokenOut: tokenOut.token,
+  //         tokenInDecimals: tokenIn.decimals,
+  //         tokenOutDecimals: tokenOut.decimals
+  //       });
 
-        if (showLogs) {
-          console.log(`Swap ${i + 1} completed`);
-        }
-      } catch (e) {
-        console.error("Error during swap:", e);
-        throw e;
-      }
-    }
-  }
+  //       if (showLogs) {
+  //         console.log(`Swap ${i + 1} completed`);
+  //       }
+  //     } catch (e) {
+  //       console.error("Error during swap:", e);
+  //       throw e;
+  //     }
+  //   }
+  // }
 
   async function buildObservationHistorySmall(logSetup = false) {
     const showLogs = logsOn && logSetup;
@@ -881,7 +871,7 @@ contract("RDOracle", async accounts => {
     });
   }
 
-  before.skip(async () => {
+  before(async () => {
     console.log("\n=== STARTING NEW TEST WITH MOCK TOKENS ===");
 
     // Step 1: Create mock tokens
@@ -934,10 +924,6 @@ contract("RDOracle", async accounts => {
       // Check quote periods
       expect(await rdOracle.quotePeriodFast()).to.be.bignumber.equal(new BN(QUOTE_PERIOD_FAST));
       expect(await rdOracle.quotePeriodSlow()).to.be.bignumber.equal(new BN(QUOTE_PERIOD_SLOW));
-      // Check minimum observation delta
-      expect(await rdOracle.minObservationDelta()).to.be.bignumber.equal(
-        new BN(MIN_OBSERVATION_DELTA)
-      );
       // Check stablecoin basket
       const basket = await rdOracle.stablecoinBasket();
       expect(basket).to.have.lengthOf(3);
@@ -953,8 +939,7 @@ contract("RDOracle", async accounts => {
           RDTAddress,
           QUOTE_PERIOD_SLOW, // Using slow period as fast period
           QUOTE_PERIOD_SLOW,
-          stablecoins,
-          MIN_OBSERVATION_DELTA
+          stablecoins
         ),
         "Oracle_PeriodMismatch()"
       );
@@ -966,8 +951,7 @@ contract("RDOracle", async accounts => {
           RDTAddress,
           QUOTE_PERIOD_SLOW + 100, // Fast period > slow period
           QUOTE_PERIOD_SLOW,
-          stablecoins,
-          MIN_OBSERVATION_DELTA
+          stablecoins
         ),
         "Oracle_PeriodMismatch()"
       );
@@ -980,8 +964,7 @@ contract("RDOracle", async accounts => {
         RDTAddress,
         QUOTE_PERIOD_FAST,
         QUOTE_PERIOD_SLOW,
-        stablecoins,
-        MIN_OBSERVATION_DELTA
+        stablecoins
       );
 
       const oracleState = await freshOracle.oracleState();
@@ -1011,28 +994,14 @@ contract("RDOracle", async accounts => {
 
     it("should revert if vault address is zero", async () => {
       await assertRevert(
-        RDOracle.new(
-          ZERO_ADDRESS,
-          RD.address,
-          QUOTE_PERIOD_FAST,
-          QUOTE_PERIOD_SLOW,
-          stablecoins,
-          MIN_OBSERVATION_DELTA
-        ),
+        RDOracle.new(ZERO_ADDRESS, RD.address, QUOTE_PERIOD_FAST, QUOTE_PERIOD_SLOW, stablecoins),
         "Oracle_VaultNotSet()"
       );
     });
 
     it("should revert if RD token address is zero", async () => {
       await assertRevert(
-        RDOracle.new(
-          vault.address,
-          ZERO_ADDRESS,
-          QUOTE_PERIOD_FAST,
-          QUOTE_PERIOD_SLOW,
-          stablecoins,
-          MIN_OBSERVATION_DELTA
-        ),
+        RDOracle.new(vault.address, ZERO_ADDRESS, QUOTE_PERIOD_FAST, QUOTE_PERIOD_SLOW, stablecoins),
         "Oracle_RDTokenNotSet()"
       );
     });
@@ -1044,8 +1013,7 @@ contract("RDOracle", async accounts => {
           RD.address,
           QUOTE_PERIOD_FAST,
           QUOTE_PERIOD_SLOW,
-          [], // Empty stablecoins array
-          MIN_OBSERVATION_DELTA
+          [] // Empty stablecoins array
         ),
         "Oracle_StablecoinBasketEmpty()"
       );
@@ -1059,8 +1027,7 @@ contract("RDOracle", async accounts => {
           RD.address,
           QUOTE_PERIOD_FAST,
           QUOTE_PERIOD_SLOW,
-          stablecoinsWithZero,
-          MIN_OBSERVATION_DELTA
+          stablecoinsWithZero
         ),
         "Oracle_StablecoinBasketZeroAddress()"
       );
@@ -1072,7 +1039,7 @@ contract("RDOracle", async accounts => {
     });
   });
 
-  describe.skip("RDOracle cardinality", async () => {
+  describe("RDOracle cardinality", async () => {
     it("should increase cardinality", async () => {
       const beforeState = await rdOracle.oracleState();
       expect(beforeState.observationCardinalityNext).to.be.bignumber.equal(new BN(100));
@@ -1118,9 +1085,10 @@ contract("RDOracle", async accounts => {
     });
   });
 
-  describe.skip("Balancer Pool Hook Functionality (afterSwap)", async () => {
+  describe("Balancer Pool Hook Functionality (afterSwap)", async () => {
     it("should call the oracle hook onAfterSwap handler", async () => {
       try {
+        await time.increase(1);
         const swapTx = await executeSwap({
           signer: ethersSigner,
           newPoolAddress,
@@ -1137,80 +1105,79 @@ contract("RDOracle", async accounts => {
         const oracleEvents = receipt.logs.filter(
           log => log.address.toLowerCase() === rdOracle.address.toLowerCase()
         );
-        expect(oracleEvents.length).to.be.equal(1);
+        expect(oracleEvents.length).to.be.equal(2);
         const eventTopic = oracleEvents[0].topics[0];
-        expect(eventTopic).to.be.equal(
-          web3.utils.sha3("OracleHookCalled(address,bool,uint32,uint32)")
-        );
+        expect(eventTopic).to.be.equal(web3.utils.sha3("OracleHookCalled(address,bool,uint32)"));
       } catch (e) {
         console.error("Error during swap:", e);
         throw e;
       }
     });
 
-    it("should not record an observation if minObservationDelta is not met", async () => {
-      const lastUpdateTime = await rdOracle.getLastUpdateTime();
-      const minObservationDelta = await rdOracle.minObservationDelta();
-      const currentBlockTime = (await time.latest()).toNumber();
-      const timeSinceLastUpdate = currentBlockTime - lastUpdateTime.toNumber();
-      const shouldUpdate = timeSinceLastUpdate >= minObservationDelta.toNumber();
-      expect(shouldUpdate).to.be.equal(false);
-      const oracleStateBefore = await rdOracle.oracleState();
-      expect(oracleStateBefore.observationIndex.toNumber()).to.be.equal(12);
+    // it("should not record an observation if minObservationDelta is not met", async () => {
+    //   const lastUpdateTime = await rdOracle.getLastUpdateTime();
+    //   const minObservationDelta = await rdOracle.minObservationDelta();
+    //   const currentBlockTime = (await time.latest()).toNumber();
+    //   const timeSinceLastUpdate = currentBlockTime - lastUpdateTime.toNumber();
+    //   const shouldUpdate = timeSinceLastUpdate >= minObservationDelta.toNumber();
+    //   expect(shouldUpdate).to.be.equal(false);
+    //   const oracleStateBefore = await rdOracle.oracleState();
+    //   expect(oracleStateBefore.observationIndex.toNumber()).to.be.equal(12);
 
-      try {
-        await executeSwap({
-          signer: ethersSigner,
-          newPoolAddress,
-          _amountIn: "11",
-          _minAmountOut: "1",
-          tokenIn: RD,
-          tokenOut: USDC,
-          tokenInDecimals: RD_DECIMALS,
-          tokenOutDecimals: USDC_DECIMALS
-        });
-      } catch (e) {
-        console.error("Error during swap:", e);
-        throw e;
-      }
+    //   try {
+    //     await executeSwap({
+    //       signer: ethersSigner,
+    //       newPoolAddress,
+    //       _amountIn: "11",
+    //       _minAmountOut: "1",
+    //       tokenIn: RD,
+    //       tokenOut: USDC,
+    //       tokenInDecimals: RD_DECIMALS,
+    //       tokenOutDecimals: USDC_DECIMALS
+    //     });
+    //   } catch (e) {
+    //     console.error("Error during swap:", e);
+    //     throw e;
+    //   }
 
-      const oracleStateAfter = await rdOracle.oracleState();
-      expect(oracleStateAfter.observationIndex.toNumber()).to.be.equal(12);
-    });
+    //   const oracleStateAfter = await rdOracle.oracleState();
+    //   expect(oracleStateAfter.observationIndex.toNumber()).to.be.equal(12);
+    // });
 
-    it("should record an observation if minObservationDelta is met", async () => {
-      const lastUpdateTime = await rdOracle.getLastUpdateTime();
-      const minObservationDelta = await rdOracle.minObservationDelta();
-      await time.increase(minObservationDelta.toNumber() + 1);
-      const currentBlockTime = (await time.latest()).toNumber();
-      const timeSinceLastUpdate = currentBlockTime - lastUpdateTime.toNumber();
-      const shouldUpdate = timeSinceLastUpdate >= minObservationDelta.toNumber();
-      expect(shouldUpdate).to.be.equal(true);
-      const oracleStateBefore = await rdOracle.oracleState();
-      expect(oracleStateBefore.observationIndex.toNumber()).to.be.equal(12);
-      try {
-        await executeSwap({
-          signer: ethersSigner,
-          newPoolAddress,
-          _amountIn: "11",
-          _minAmountOut: "1",
-          tokenIn: RD,
-          tokenOut: USDC,
-          tokenInDecimals: RD_DECIMALS,
-          tokenOutDecimals: USDC_DECIMALS
-        });
-      } catch (e) {
-        console.error("Error during swap:", e);
-        throw e;
-      }
-      const oracleStateAfter = await rdOracle.oracleState();
-      expect(oracleStateAfter.observationIndex.toNumber()).to.be.equal(13);
-    });
+    // it("should record an observation if minObservationDelta is met", async () => {
+    //   const lastUpdateTime = await rdOracle.getLastUpdateTime();
+    //   const minObservationDelta = await rdOracle.minObservationDelta();
+    //   await time.increase(minObservationDelta.toNumber() + 1);
+    //   const currentBlockTime = (await time.latest()).toNumber();
+    //   const timeSinceLastUpdate = currentBlockTime - lastUpdateTime.toNumber();
+    //   const shouldUpdate = timeSinceLastUpdate >= minObservationDelta.toNumber();
+    //   expect(shouldUpdate).to.be.equal(true);
+    //   const oracleStateBefore = await rdOracle.oracleState();
+    //   expect(oracleStateBefore.observationIndex.toNumber()).to.be.equal(12);
+    //   try {
+    //     await executeSwap({
+    //       signer: ethersSigner,
+    //       newPoolAddress,
+    //       _amountIn: "11",
+    //       _minAmountOut: "1",
+    //       tokenIn: RD,
+    //       tokenOut: USDC,
+    //       tokenInDecimals: RD_DECIMALS,
+    //       tokenOutDecimals: USDC_DECIMALS
+    //     });
+    //   } catch (e) {
+    //     console.error("Error during swap:", e);
+    //     throw e;
+    //   }
+    //   const oracleStateAfter = await rdOracle.oracleState();
+    //   expect(oracleStateAfter.observationIndex.toNumber()).to.be.equal(13);
+    // });
   });
 
-  describe.skip("Balancer Pool Hook Functionality (afterAddLiquidity)", async () => {
+  describe("Balancer Pool Hook Functionality (afterAddLiquidity)", async () => {
     it("should call the oracle hook onAfterAddLiquidity handler", async () => {
       try {
+        await time.increase(1);
         const txHash = await addLiquidity();
         // Get transaction receipt to see if the hook was called and check if the event is correct
         const receipt = await web3.eth.getTransactionReceipt(txHash);
@@ -1218,11 +1185,9 @@ contract("RDOracle", async accounts => {
         const oracleEvents = receipt.logs.filter(
           log => log.address.toLowerCase() === rdOracle.address.toLowerCase()
         );
-        expect(oracleEvents.length).to.be.equal(1);
+        expect(oracleEvents.length).to.be.equal(2);
         const eventTopic = oracleEvents[0].topics[0];
-        expect(eventTopic).to.be.equal(
-          web3.utils.sha3("OracleHookCalled(address,bool,uint32,uint32)")
-        );
+        expect(eventTopic).to.be.equal(web3.utils.sha3("OracleHookCalled(address,bool,uint32)"));
       } catch (e) {
         console.error("Error during addLiquidity:", e);
         throw e;
@@ -1230,9 +1195,10 @@ contract("RDOracle", async accounts => {
     });
   });
 
-  describe.skip("Balancer Pool Hook Functionality (afterRemoveLiquidity)", async () => {
+  describe("Balancer Pool Hook Functionality (afterRemoveLiquidity)", async () => {
     it("should call the oracle hook onAfterRemoveLiquidity handler", async () => {
       try {
+        await time.increase(1);
         const txHash = await removeLiquidity();
         // Get transaction receipt to see if the hook was called and check if the event is correct
         const receipt = await web3.eth.getTransactionReceipt(txHash);
@@ -1240,11 +1206,9 @@ contract("RDOracle", async accounts => {
         const oracleEvents = receipt.logs.filter(
           log => log.address.toLowerCase() === rdOracle.address.toLowerCase()
         );
-        expect(oracleEvents.length).to.be.equal(1);
+        expect(oracleEvents.length).to.be.equal(2);
         const eventTopic = oracleEvents[0].topics[0];
-        expect(eventTopic).to.be.equal(
-          web3.utils.sha3("OracleHookCalled(address,bool,uint32,uint32)")
-        );
+        expect(eventTopic).to.be.equal(web3.utils.sha3("OracleHookCalled(address,bool,uint32)"));
       } catch (e) {
         console.error("Error during removeLiquidity:", e);
         throw e;
@@ -1252,14 +1216,42 @@ contract("RDOracle", async accounts => {
     });
   });
 
-  describe.skip("Price Reading Functions", () => {
+  describe("Price Reading Functions", () => {
     it("should build observation history through multiple swaps", async () => {
-      const finalOracleState = await rdOracle.oracleState();
-      expect(finalOracleState.observationIndex.toNumber()).to.be.equal(13);
+      const before = await rdOracle.oracleState();
+      const beforeIdx = before.observationIndex.toNumber();
+
+      await time.increase(2);
+      await executeSwap({
+        signer: ethersSigner,
+        newPoolAddress,
+        _amountIn: "10000",
+        _minAmountOut: "1",
+        tokenIn: RD,
+        tokenOut: USDC,
+        tokenInDecimals: RD_DECIMALS,
+        tokenOutDecimals: USDC_DECIMALS
+      });
+
+      await time.increase(2);
+      await executeSwap({
+        signer: ethersSigner,
+        newPoolAddress,
+        _amountIn: "15000",
+        _minAmountOut: "1",
+        tokenIn: USDC,
+        tokenOut: RD,
+        tokenInDecimals: USDC_DECIMALS,
+        tokenOutDecimals: RD_DECIMALS
+      });
+
+      const after = await rdOracle.oracleState();
+      expect(after.observationIndex.toNumber()).to.equal(beforeIdx + 2);
     });
 
     it("should read fast price correctly", async () => {
       const fastPrice = await rdOracle.readFast();
+      expect(fastPrice.toString()).to.be.equal("1008334122065052721");
       expect(fastPrice).to.be.bignumber.gt(new BN(0));
 
       // Use a range to account for test non-determinism
@@ -1274,9 +1266,9 @@ contract("RDOracle", async accounts => {
 
     it("should read slow price correctly", async () => {
       const slowPrice = await rdOracle.readSlow();
-      expect(slowPrice.toString()).to.be.equal("1002904063656376288");
+      expect(slowPrice.toString()).to.be.equal("1002503002301265531");
       expect(slowPrice).to.be.bignumber.gt(new BN(0));
-      expect(slowPrice).to.be.bignumber.equal(new BN("1002904063656376288"));
+      expect(slowPrice).to.be.bignumber.equal(new BN("1002503002301265531"));
     });
 
     it("should read both fast and slow prices", async () => {
@@ -1290,13 +1282,13 @@ contract("RDOracle", async accounts => {
       expect(_fastValue).to.be.bignumber.gte(lowerBound);
       expect(_fastValue).to.be.bignumber.lte(upperBound);
 
-      expect(_slowValue).to.be.bignumber.equal(new BN("1002904063656376288"));
+      expect(_slowValue).to.be.bignumber.equal(new BN("1002503002301265531"));
       expect(_fastValue).to.be.bignumber.gt(new BN(0));
       expect(_slowValue).to.be.bignumber.gt(new BN(0));
     });
   });
 
-  describe.skip("Price Calculation Functions", () => {
+  describe("Price Calculation Functions", () => {
     it("should get fast result with validity", async () => {
       const { _result, _validity } = await rdOracle.getFastResultWithValidity();
       expect(_result).to.be.bignumber.gt(new BN(0));
@@ -1308,6 +1300,7 @@ contract("RDOracle", async accounts => {
       const lowerBound = expectedFastPrice.sub(tolerance);
       const upperBound = expectedFastPrice.add(tolerance);
 
+      expect(_result).to.be.bignumber.equal(new BN("1008334122065052721"));
       expect(_result).to.be.bignumber.gte(lowerBound);
       expect(_result).to.be.bignumber.lte(upperBound);
     });
@@ -1315,7 +1308,7 @@ contract("RDOracle", async accounts => {
     it("should get slow result with validity", async () => {
       const { _result, _validity } = await rdOracle.getSlowResultWithValidity();
       expect(_result).to.be.bignumber.gt(new BN(0));
-      expect(_result).to.be.bignumber.equal(new BN("1002904063656376288"));
+      expect(_result).to.be.bignumber.equal(new BN("1002503002301265531"));
       expect(_validity).to.be.true;
     });
 
@@ -1332,14 +1325,14 @@ contract("RDOracle", async accounts => {
 
       expect(_fastResult).to.be.bignumber.gte(lowerBound);
       expect(_fastResult).to.be.bignumber.lte(upperBound);
-
-      expect(_slowResult).to.be.bignumber.equal(new BN("1002904063656376288"));
+      expect(_fastResult).to.be.bignumber.equal(new BN("1008334122065052721"));
+      expect(_slowResult).to.be.bignumber.equal(new BN("1002503002301265531"));
       expect(_fastValidity).to.be.true;
       expect(_slowValidity).to.be.true;
     });
   });
 
-  describe.skip("Oracle Observation Management", () => {
+  describe("Oracle Observation Management", () => {
     it("should observe price data correctly", async () => {
       // Test observe() function
       const { tickCumulatives, secondsPerLiquidityCumulativeX128s } = await rdOracle.observe([
@@ -1373,7 +1366,7 @@ contract("RDOracle", async accounts => {
     // });
   });
 
-  describe.skip("Price Update Logic", () => {
+  describe("Price Update Logic", () => {
     before(async () => {
       // Create test helper instance
       rdOracleTestHelper = await RDOracleTestHelper.new(
@@ -1381,8 +1374,7 @@ contract("RDOracle", async accounts => {
         RDTAddress,
         QUOTE_PERIOD_FAST,
         QUOTE_PERIOD_SLOW,
-        stablecoins,
-        MIN_OBSERVATION_DELTA
+        stablecoins
       );
     });
 
@@ -1396,7 +1388,7 @@ contract("RDOracle", async accounts => {
 
     it("should update synthetic RD price via test function and emit OraclePriceUpdated event", async () => {
       const oracleStateBefore = await rdOracle.oracleState();
-      expect(oracleStateBefore.observationIndex.toNumber()).to.be.equal(15);
+      const beforeIndex = oracleStateBefore.observationIndex.toNumber();
 
       const { lastBalancesLiveScaled18 } = await iVault.getPoolTokenInfo(newPoolAddress);
 
@@ -1427,14 +1419,14 @@ contract("RDOracle", async accounts => {
 
       const oracleStateAfter = await rdOracle.oracleState();
 
-      expect(oracleStateAfter.observationIndex.toNumber()).to.be.equal(16);
+      expect(oracleStateAfter.observationIndex.toNumber()).to.be.equal(beforeIndex + 1);
     });
 
     it("should emit OracleHookCalled and OraclePriceUpdated events when price changes", async () => {
       // Test that OraclePriceUpdated event is emitted when price changes
       const initialState = await rdOracle.oracleState();
 
-      await time.increase(MIN_OBSERVATION_DELTA + 10); // Add buffer
+      await time.increase(BLOCK_TIME + 10); // Add buffer
 
       const swapTx = await executeSwap({
         signer: ethersSigner,
@@ -1461,7 +1453,7 @@ contract("RDOracle", async accounts => {
         });
       }
 
-      const hookEventSig = web3.utils.sha3("OracleHookCalled(address,bool,uint32,uint32)");
+      const hookEventSig = web3.utils.sha3("OracleHookCalled(address,bool,uint32)");
       const priceEventSig = web3.utils.sha3(
         "OraclePriceUpdated(int24,int24,uint160,uint160,uint16)"
       );
@@ -1480,7 +1472,7 @@ contract("RDOracle", async accounts => {
     });
   });
 
-  describe.skip("Mathematical Functions", () => {
+  describe("Mathematical Functions", () => {
     it("should calculate median correctly for 3 elements", async () => {
       // Test with 3 elements (odd)
       const oddArray = [

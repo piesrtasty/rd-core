@@ -103,9 +103,6 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable {
     /// @inheritdoc IRDOracle
     string public symbol = "RD / USD";
 
-    /// @inheritdoc IRDOracle
-    uint32 public override minObservationDelta;
-
     // --- Init ---
 
     /**
@@ -114,15 +111,13 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable {
      * @param  _quotePeriodSlow Length in seconds of the TWAP used to consult the pool
      * @param  _quotePeriodFast Length in seconds of the TWAP used to consult the pool
      * @param  _stablecoins Array of addresses of the stablecoins in the pool
-     * @param  _minObservationDelta The minimum observation delta
      */
     constructor(
         address _vault,
         address _rdToken,
         uint32 _quotePeriodFast,
         uint32 _quotePeriodSlow,
-        address[] memory _stablecoins,
-        uint32 _minObservationDelta
+        address[] memory _stablecoins
     ) VaultGuard(IVault(_vault)) {
         if (_quotePeriodFast >= _quotePeriodSlow) {
             revert Oracle_PeriodMismatch();
@@ -146,7 +141,6 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable {
         _stablecoinBasket = _stablecoins;
         quotePeriodFast = _quotePeriodFast;
         quotePeriodSlow = _quotePeriodSlow;
-        minObservationDelta = _minObservationDelta;
         // Initialize oracle state with price of 1 RD/USD
         _initialize(2 ** 96);
         // _initialize(_convertPriceToSqrtPriceX96(_WAD));
@@ -270,12 +264,12 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable {
 
         uint32 _timeSinceLastUpdate = _blockTimestamp() - _lastUpdateTime;
 
-        if (_timeSinceLastUpdate < minObservationDelta) {
-            _shouldUpdate = false;
-        }
+        // if (_timeSinceLastUpdate < minObservationDelta) {
+        //     _shouldUpdate = false;
+        // }
 
         // Emit event for debugging
-        emit OracleHookCalled(_pool, _shouldUpdate, _timeSinceLastUpdate, minObservationDelta);
+        emit OracleHookCalled(_pool, _shouldUpdate, _timeSinceLastUpdate);
 
         if (_shouldUpdate) {
             // Get last balances of all tokens in the pool

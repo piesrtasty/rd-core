@@ -12,14 +12,8 @@ interface IRDOracle {
      * @param _pool The pool address
      * @param _shouldUpdate Whether the oracle should update
      * @param _timeSinceLastUpdate Time since last update
-     * @param _minDelta Minimum observation delta
      */
-    event OracleHookCalled(
-        address indexed _pool,
-        bool _shouldUpdate,
-        uint32 _timeSinceLastUpdate,
-        uint32 _minDelta
-    );
+    event OracleHookCalled(address indexed _pool, bool _shouldUpdate, uint32 _timeSinceLastUpdate);
 
     /**
      * @notice Emitted when the oracle price is updated
@@ -187,12 +181,6 @@ interface IRDOracle {
      * @return _symbol The symbol of the quote
      */
     function symbol() external view returns (string memory _symbol);
-
-    /**
-     * @notice The minimum observation delta
-     * @return _minObservationDelta The minimum observation delta
-     */
-    function minObservationDelta() external view returns (uint32 _minObservationDelta);
 
     /**
      * @notice Getter for the stablecoin basket indices
