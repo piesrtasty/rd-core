@@ -5,9 +5,11 @@ pragma solidity 0.6.11;
 import "./Interfaces/ITroveManager.sol";
 import "./Interfaces/IRewards.sol";
 import "./Interfaces/ISortedTroves.sol";
+import "./Interfaces/IAggregator.sol";
 import "./Dependencies/LiquityBase.sol";
 import "./Dependencies/Ownable.sol";
 import "./Dependencies/CheckContract.sol";
+import "./Interfaces/ILUSDToken.sol";
 // import "./Dependencies/console.sol";
 
 contract HintHelpers is LiquityBase, Ownable, CheckContract {
@@ -17,7 +19,8 @@ contract HintHelpers is LiquityBase, Ownable, CheckContract {
     ISortedTroves public sortedShieldedTroves;
     ITroveManager public troveManager;
     IRewards public rewards;
-
+    IAggregator public aggregator;
+    ILUSDToken public lusdToken;
     // --- Events ---
 
     event SortedTrovesAddressChanged(address _sortedTrovesAddress);
@@ -42,6 +45,7 @@ contract HintHelpers is LiquityBase, Ownable, CheckContract {
         uint parUsed;
         uint accRateUsed;
         uint accShieldRateUsed;
+        uint totalLUSDSupplyAtStart;
     }
 
     // --- Dependency setters ---
@@ -51,7 +55,9 @@ contract HintHelpers is LiquityBase, Ownable, CheckContract {
         address _sortedShieldedTrovesAddress,
         address _troveManagerAddress,
         address _rewardsAddress,
-        address _relayerAddress
+        address _relayerAddress,
+        address _aggregatorAddress,
+        address _lusdTokenAddress
     )
         external
         onlyOwner
@@ -61,13 +67,15 @@ contract HintHelpers is LiquityBase, Ownable, CheckContract {
         checkContract(_troveManagerAddress);
         checkContract(_rewardsAddress);
         checkContract(_relayerAddress);
-
+        checkContract(_aggregatorAddress);
+        checkContract(_lusdTokenAddress);
         sortedTroves = ISortedTroves(_sortedTrovesAddress);
         sortedShieldedTroves = ISortedTroves(_sortedShieldedTrovesAddress);
         troveManager = ITroveManager(_troveManagerAddress);
         rewards = IRewards(_rewardsAddress);
         relayer = IRelayer(_relayerAddress);
-
+        aggregator = IAggregator(_aggregatorAddress);
+        lusdToken = ILUSDToken(_lusdTokenAddress);
         emit SortedTrovesAddressChanged(_sortedTrovesAddress);
         emit SortedShieldedTrovesAddressChanged(_sortedShieldedTrovesAddress);
         emit TroveManagerAddressChanged(_troveManagerAddress);
@@ -110,6 +118,7 @@ contract HintHelpers is LiquityBase, Ownable, CheckContract {
         )
     {
         HintLocals memory vars;
+        vars.totalLUSDSupplyAtStart = lusdToken.totalSupply();
         vars.remainingLUSD = _LUSDamount;
         if (_maxIterations == 0) { _maxIterations = type(uint).max; }
 
@@ -178,7 +187,17 @@ contract HintHelpers is LiquityBase, Ownable, CheckContract {
                     vars.coll = troveManager.getTroveColl(who)
                         .add(rewards.getPendingCollateralReward(who));
 
-                    vars.newColl = vars.coll.sub(vars.maxRedeemableLUSD.mul(vars.parUsed).div(_price));
+                    // Compute gross collateral equivalent for this redemption lot
+                    uint collateralGross = vars.maxRedeemableLUSD.mul(vars.parUsed).div(_price);
+                    // Apply redemption fee so that the fee remains in the trove, matching TroveManager logic
+                    uint projectedRedemptionRate = aggregator.calcRateForRedemption(_LUSDamount, vars.totalLUSDSupplyAtStart);
+                    // Cap at 100%
+                    projectedRedemptionRate = LiquityMath._min(projectedRedemptionRate, DECIMAL_PRECISION);
+                    
+                    uint collateralFee = projectedRedemptionRate.mul(collateralGross).div(DECIMAL_PRECISION);
+                    uint collateralNet = collateralGross.sub(collateralFee);
+
+                    vars.newColl = vars.coll.sub(collateralNet);
                     vars.newDebt = netLUSDDebt.sub(vars.maxRedeemableLUSD);
                     vars.compositeDebt = _getCompositeDebt(vars.newDebt);
 

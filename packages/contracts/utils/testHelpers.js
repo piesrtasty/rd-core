@@ -1627,6 +1627,16 @@ class TestHelper {
 
     return tx
   }
+  static async getEntireSystemDebt(contracts) {
+    const rate = await contracts.troveManager.accumulatedRate()
+    const shieldRate = await contracts.troveManager.accumulatedShieldRate()
+    return await contracts.troveManager.getEntireSystemDebt(rate, shieldRate)
+  }
+  static calculateCollateralFee(collateralDrawn, redemptionRate) {
+    const fee = collateralDrawn.mul(redemptionRate).div(MoneyValues._1e18BN)
+    return fee
+  }
+
 
   // --- Composite functions ---
 
