@@ -11,7 +11,7 @@ import {IHooks} from "./Vendor/@balancer-labs/v3-interfaces/contracts/vault/IHoo
 import {IVault} from "./Vendor/@balancer-labs/v3-interfaces/contracts/vault/IVault.sol";
 
 import {VaultGuard} from "./Vendor/@balancer-labs/v3-vault/contracts/VaultGuard.sol";
-import {HookFlags, TokenConfig, LiquidityManagement, AfterSwapParams, AddLiquidityKind, RemoveLiquidityKind} from "./Vendor/@balancer-labs/v3-interfaces/contracts/vault/VaultTypes.sol";
+import {HookFlags, TokenConfig, LiquidityManagement, AddLiquidityKind, RemoveLiquidityKind, PoolSwapParams} from "./Vendor/@balancer-labs/v3-interfaces/contracts/vault/VaultTypes.sol";
 
 import {BasePoolFactory} from "./Vendor/@balancer-labs/v3-pool-utils/contracts/BasePoolFactory.sol";
 import {StablePool, Rounding} from "./Vendor/@balancer-labs/v3-pool-stable/contracts/StablePool.sol";
@@ -207,48 +207,47 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable {
 
     /// @inheritdoc BaseHooks
     function getHookFlags() public pure override returns (HookFlags memory hookFlags_) {
-        hookFlags_.shouldCallAfterSwap = true;
-        hookFlags_.shouldCallAfterAddLiquidity = true;
-        hookFlags_.shouldCallAfterRemoveLiquidity = true;
+        hookFlags_.shouldCallBeforeSwap = true;
+        hookFlags_.shouldCallBeforeAddLiquidity = true;
+        hookFlags_.shouldCallBeforeRemoveLiquidity = true;
         return hookFlags_;
     }
 
     /// @inheritdoc BaseHooks
-    function onAfterSwap(
-        AfterSwapParams calldata _params
-    ) public override onlyVault returns (bool _success, uint256 _hookAdjustedAmountCalculatedRaw) {
-        _onHookCalled(_params.pool);
-        return (true, 0);
+    function onBeforeSwap(
+        PoolSwapParams calldata,
+        address _pool
+    ) public override onlyVault returns (bool _success) {
+        _onHookCalled(_pool);
+        return (true);
     }
 
     /// @inheritdoc BaseHooks
-    function onAfterAddLiquidity(
+    function onBeforeAddLiquidity(
         address,
         address _pool,
         AddLiquidityKind,
         uint256[] memory,
-        uint256[] memory _amountsInRaw,
         uint256,
         uint256[] memory,
         bytes memory
-    ) public override onlyVault returns (bool, uint256[] memory) {
+    ) public override onlyVault returns (bool) {
         _onHookCalled(_pool);
-        return (true, _amountsInRaw);
+        return (true);
     }
 
     /// @inheritdoc BaseHooks
-    function onAfterRemoveLiquidity(
+    function onBeforeRemoveLiquidity(
         address,
         address _pool,
         RemoveLiquidityKind,
         uint256,
         uint256[] memory,
-        uint256[] memory _amountsOutRaw,
         uint256[] memory,
         bytes memory
-    ) public override onlyVault returns (bool, uint256[] memory) {
+    ) public override onlyVault returns (bool) {
         _onHookCalled(_pool);
-        return (true, _amountsOutRaw);
+        return (true);
     }
 
     /**
