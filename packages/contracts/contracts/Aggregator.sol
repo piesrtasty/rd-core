@@ -14,6 +14,7 @@ import "./Interfaces/IRelayer.sol";
 import "./Dependencies/LiquityBase.sol";
 import "./Dependencies/Ownable.sol";
 import "./Dependencies/CheckContract.sol";
+import "./Dependencies/console.sol";
 
 contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
     string constant public NAME = "Aggregator";
@@ -90,27 +91,36 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
     * then,
     * 2) increases the baseRate based on the amount redeemed, as a proportion of total supply
     */
-    function updateBaseRateFromRedemption(uint _ETHDrawn,  uint _price, uint _par, uint _totalLUSDSupply) external override returns (uint) {
+    function updateBaseRateFromRedemption(uint _LUSDAmount, uint _totalLUSDSupply) external override returns (uint) {
         _requireCallerIsTroveManager();
         uint decayedBaseRate = _calcDecayedBaseRate();
 
-        /* Convert the drawn ETH back to LUSD at face value rate (1 LUSD:1 USD), in order to get
-        * the fraction of total supply that was redeemed at face value. */
-        uint redeemedLUSDFraction = _ETHDrawn.mul(_price).mul(DECIMAL_PRECISION).div(_totalLUSDSupply.mul(_par));
+        uint newBaseRate = calcNewBaseRate(_LUSDAmount, decayedBaseRate,_totalLUSDSupply);
 
-        uint newBaseRate = decayedBaseRate.add(redeemedLUSDFraction.div(BETA));
-        newBaseRate = LiquityMath._min(newBaseRate, DECIMAL_PRECISION); // cap baseRate at a maximum of 100%
-        //assert(newBaseRate <= DECIMAL_PRECISION); // This is already enforced in the line above
         assert(newBaseRate > 0); // Base rate is always non-zero after redemption
 
         // Update the baseRate state variable
         baseRate = newBaseRate;
         emit BaseRateUpdated(newBaseRate);
-        //emit BaseRateUpdated(_totalLUSDSupply);
         
         _updateLastFeeOpTime();
 
         return newBaseRate;
+    }
+
+    function calcNewBaseRate(uint _LUSDAmount, uint _baseRate, uint _totalLUSDSupply) public view override returns (uint) {
+        uint redeemedLUSDFraction = _LUSDAmount.mul(DECIMAL_PRECISION).div(_totalLUSDSupply);
+
+        uint256 newBaseRate = _baseRate.add(redeemedLUSDFraction.div(BETA));
+
+        newBaseRate = LiquityMath._min(newBaseRate, DECIMAL_PRECISION); // cap baseRate at a maximum of 100%
+
+        return newBaseRate;
+    }
+
+    function calcRateForRedemption(uint _LUSDAmount, uint _totalLUSDSupply) public view override returns (uint) {
+        uint256 newBaseRate = calcNewBaseRate(_LUSDAmount, baseRate, _totalLUSDSupply);
+        return _calcRedemptionRate(newBaseRate);
     }
 
     function getRedemptionRate() public view override returns (uint) {
@@ -129,14 +139,15 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
     }
 
     function getRedemptionFee(uint _ETHDrawn) public view override returns (uint) {
-        return _calcRedemptionFee(getRedemptionRate(), _ETHDrawn);
+        return calcRedemptionFee(getRedemptionRate(), _ETHDrawn);
     }
 
     function getRedemptionFeeWithDecay(uint _ETHDrawn) external view override returns (uint) {
-        return _calcRedemptionFee(getRedemptionRateWithDecay(), _ETHDrawn);
+        return calcRedemptionFee(getRedemptionRateWithDecay(), _ETHDrawn);
     }
 
-    function _calcRedemptionFee(uint _redemptionRate, uint _ETHDrawn) internal pure returns (uint) {
+    function calcRedemptionFee(uint _redemptionRate, uint _ETHDrawn) public view override returns (uint) {
+        if (_ETHDrawn == 0) return 0;
         uint redemptionFee = _redemptionRate.mul(_ETHDrawn).div(DECIMAL_PRECISION);
         require(redemptionFee < _ETHDrawn, "TroveManager: Fee would eat up all returned collateral");
         return redemptionFee;

@@ -36,12 +36,17 @@ interface IAggregator is ILiquityBase {
 
     function lusdToken() external view returns (ILUSDToken);
 
-    function updateBaseRateFromRedemption(uint, uint, uint, uint) external returns (uint);
+    function updateBaseRateFromRedemption(uint, uint) external returns (uint);
 
     function getRedemptionRate() external view returns (uint);
     function getRedemptionRateWithDecay() external view returns (uint);
 
+    function calcRateForRedemption(uint _LUSDAmount, uint _totalLUSDSupply) external view returns (uint);
+    function calcNewBaseRate(uint _LUSDAmount, uint _baseRate, uint _totalLUSDSupply) external view returns (uint);
+
     function getRedemptionFee(uint _ETHDrawn) external view returns (uint);
     function getRedemptionFeeWithDecay(uint _ETHDrawn) external view returns (uint);
+
+    function calcRedemptionFee(uint _redemptionRate, uint _ETHDrawn) external view returns (uint);
 
 }

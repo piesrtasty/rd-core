@@ -4,6 +4,7 @@ pragma solidity 0.6.11;
 pragma experimental ABIEncoderV2;
 
 import "./TroveManager.sol";
+import "./Rewards.sol";
 import "./SortedTroves.sol";
 
 /*  Helper contract for grabbing Trove data for the front end. Not part of the core Liquity system. */
@@ -15,15 +16,17 @@ contract MultiTroveGetter {
         uint coll;
         uint stake;
 
-        uint snapshotETH;
+        uint snapshotColl;
         uint snapshotLUSDDebt;
     }
 
     TroveManager public troveManager; // XXX Troves missing from ITroveManager?
+    Rewards public rewards;
     ISortedTroves public sortedTroves;
 
-    constructor(TroveManager _troveManager, ISortedTroves _sortedTroves) public {
+    constructor(TroveManager _troveManager, Rewards _rewards, ISortedTroves _sortedTroves) public {
         troveManager = _troveManager;
+        rewards = _rewards;
         sortedTroves = _sortedTroves;
     }
 
@@ -81,9 +84,9 @@ contract MultiTroveGetter {
                 /* arrayIndex */
             ) = troveManager.Troves(currentTroveowner);
             (
-                _troves[idx].snapshotETH,
+                _troves[idx].snapshotColl,
                 _troves[idx].snapshotLUSDDebt
-            ) = troveManager.rewardSnapshots(currentTroveowner);
+            ) = rewards.rewardSnapshots(currentTroveowner);
 
             currentTroveowner = sortedTroves.getNext(currentTroveowner);
         }
@@ -110,9 +113,9 @@ contract MultiTroveGetter {
                 /* arrayIndex */
             ) = troveManager.Troves(currentTroveowner);
             (
-                _troves[idx].snapshotETH,
+                _troves[idx].snapshotColl,
                 _troves[idx].snapshotLUSDDebt
-            ) = troveManager.rewardSnapshots(currentTroveowner);
+            ) = rewards.rewardSnapshots(currentTroveowner);
 
             currentTroveowner = sortedTroves.getPrev(currentTroveowner);
         }

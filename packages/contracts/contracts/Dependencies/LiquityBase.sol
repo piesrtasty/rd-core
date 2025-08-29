@@ -18,26 +18,28 @@ import "../Dependencies/console.sol";
 contract LiquityBase is BaseMath, ILiquityBase {
     using SafeMath for uint;
 
-    uint constant public _100pct = 1000000000000000000; // 1e18 == 100%
+    // Minimum collateral ratio for all individual troves, shielded and unshielded
+    uint constant public MCR = 110 * 10**16; // 110%
 
-    // Minimum collateral ratio for individual troves
-    uint constant public MCR = 1100000000000000000; // 110%
+    // Critical system collateral ratio.
+    // If the system's total collateral ratio (TCR) falls below the CCR, some borrow ops are constrained
+    uint constant public CCR = 150 * 10**16; // 150%
 
-    // Critical system collateral ratio. If the system's total collateral ratio (TCR) falls below the CCR, Recovery Mode is triggered.
-    uint constant public CCR = 1500000000000000000; // 150%
+    // Shield collateral ratio
+    // Shielded troves under HCR can be redeemed against but are still only liquidated when ICR < MCR
+    uint constant public HCR = 130 * 10**16; //130%
 
     // Amount of LUSD to be locked in gas pool on opening troves
     uint constant public LUSD_GAS_COMPENSATION = 200e18;
 
     // Minimum amount of net LUSD debt a trove must have
     uint constant public MIN_NET_DEBT = 1800e18;
-    // uint constant public MIN_NET_DEBT = 0; 
 
     uint constant public PERCENT_DIVISOR = 200; // dividing by 200 yields 0.5%
 
-    uint constant public BORROWING_FEE_FLOOR = DECIMAL_PRECISION / 1000 * 5; // 0.5%
-
     IActivePool public override activePool;
+
+    IActivePool public activeShieldedPool;
 
     IDefaultPool public defaultPool;
 
@@ -61,27 +63,14 @@ contract LiquityBase is BaseMath, ILiquityBase {
         return _entireColl / PERCENT_DIVISOR;
     }
 
-    function getEntireSystemColl() public view returns (uint entireSystemColl) {
-        uint activeColl = activePool.getCollateral();
-        uint liquidatedColl = defaultPool.getCollateral();
-
-        return activeColl.add(liquidatedColl);
+    function getEntireSystemColl() public view returns (uint) {
+        return activePool.getCollateral().add(activeShieldedPool.getCollateral()).add(defaultPool.getCollateral());
     }
 
-    function getEntireSystemDebt(uint accumulatedRate) public view returns (uint entireSystemDebt) {
-        //return _actualDebt(getEntireNormalizedSystemDebt(), accumulatedRate);
-        return getEntireNormalizedSystemDebt().mul(accumulatedRate).div(RATE_PRECISION);
-    }
-
-    function getEntireNormalizedSystemDebt() public view returns (uint entireSystemDebt) {
-        uint activeDebt = activePool.getLUSDDebt();
-        uint closedDebt = defaultPool.getLUSDDebt();
-
-        return activeDebt.add(closedDebt);
-    }
-
-    function updatePar() public returns (uint par) {
-        return relayer.updatePar();
+    function getEntireSystemDebt(uint accumulatedRate, uint accumulatedShieldRate) public view override returns (uint) {
+        uint baseDebt = activePool.getLUSDDebt().mul(accumulatedRate).div(RATE_PRECISION);
+        uint shieldedDebt = activeShieldedPool.getLUSDDebt().mul(accumulatedShieldRate).div(RATE_PRECISION);
+        return baseDebt + shieldedDebt + defaultPool.getLUSDDebt();
     }
 
     // Returns the normalized debt from actual debt
@@ -89,16 +78,14 @@ contract LiquityBase is BaseMath, ILiquityBase {
         normDebt = debt.mul(RATE_PRECISION).div(rate);
 
         // Round up if rounding caused an underestimation
-        /*
         if (normDebt.mul(rate).div(RATE_PRECISION) < debt) {
             normDebt += 1;
         }
-        */
     }
 
     // Returns the actual debt from normalized debt
-    function _actualDebt(uint256 normalizedDebt, uint256 rate) internal pure returns (uint256 actualDebt) {
-        actualDebt = normalizedDebt.mul(rate).div(RATE_PRECISION);
+    function _actualDebt(uint256 normalizedDebt, uint256 rate) internal pure returns (uint256) {
+        return normalizedDebt.mul(rate).div(RATE_PRECISION);
 
         // Round up if rounding caused an underestimation
         /*
@@ -109,28 +96,12 @@ contract LiquityBase is BaseMath, ILiquityBase {
 
     }
 
-    /*
-    // Returns the actual debt from normalized debt
-    function _actualDebt(uint256 normalizedDebt, uint256 rate) internal pure returns (uint256) {
-        return normalizedDebt.mul(rate).div(RATE_PRECISION);
-    }
-    */
-
-
-    function _getTCR(uint _price, uint _accRate) internal view returns (uint TCR) {
-        uint entireSystemColl = getEntireSystemColl();
-        uint entireSystemDebt = getEntireSystemDebt(_accRate);
-        uint par = relayer.par();
-
-        TCR = LiquityMath._computeCR(entireSystemColl, entireSystemDebt, _price, par);
-
-        return TCR;
+    function _getTCR(uint _price, uint _accRate, uint _accShieldRate) internal view returns (uint) {
+        return LiquityMath._computeCR(getEntireSystemColl(), getEntireSystemDebt(_accRate, _accShieldRate), _price, relayer.par());
     }
 
-    function _checkRecoveryMode(uint _price, uint _accRate) internal view returns (bool) {
-        uint TCR = _getTCR(_price, _accRate);
-
-        return TCR < CCR;
+    function _checkRecoveryMode(uint _price, uint _accRate, uint _accShieldRate) internal view returns (bool) {
+        return _getTCR(_price, _accRate, _accShieldRate) < CCR;
     }
 
     function _requireUserAcceptsFee(uint _fee, uint _amount, uint _maxFeePercentage) internal pure {
