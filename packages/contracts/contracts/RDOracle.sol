@@ -257,16 +257,16 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable {
      */
     function _onHookCalled(address _pool) internal {
         // If time since last observation > minDelta then update price in observations
-        bool _shouldUpdate = true;
+        bool _shouldUpdate = false;
 
         uint16 _observationIndex = oracleState.observationIndex;
         (uint32 _lastUpdateTime, , , ) = this.observations(_observationIndex);
 
         uint32 _timeSinceLastUpdate = _blockTimestamp() - _lastUpdateTime;
 
-        // if (_timeSinceLastUpdate < minObservationDelta) {
-        //     _shouldUpdate = false;
-        // }
+        if (_blockTimestamp() > _lastUpdateTime) {
+            _shouldUpdate = true;
+        }
 
         // Emit event for debugging
         emit OracleHookCalled(_pool, _shouldUpdate, _timeSinceLastUpdate);
@@ -275,13 +275,13 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable {
             // Get last balances of all tokens in the pool
             (, , , uint256[] memory _lastBalancesWad) = IVault(vault).getPoolTokenInfo(_pool);
             _updateSyntheticRDPrice(_lastBalancesWad);
-        }
 
-        // Update the relayer - Rate control uses the fast TWAP, Par control uses the slow TWAP
-        (uint256 fastVal, bool fastOk, uint256 slowVal, bool slowOk) = this
-            .getFastSlowResultWithValidity();
-        if (fastOk && slowOk && relayer != address(0)) {
-            IRelayer(relayer).updateRateAndParWithMarket(fastVal, slowVal);
+            // Update the relayer - Rate control uses the fast TWAP, Par control uses the slow TWAP
+            (uint256 fastVal, bool fastOk, uint256 slowVal, bool slowOk) = this
+                .getFastSlowResultWithValidity();
+            if (fastOk && slowOk && relayer != address(0)) {
+                IRelayer(relayer).updateRateAndParWithMarket(fastVal, slowVal);
+            }
         }
     }
 
