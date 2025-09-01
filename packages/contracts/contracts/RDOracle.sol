@@ -21,13 +21,14 @@ import {TickMath} from "./Vendor/@uniswap/v3-core/contracts/libraries/TickMath.s
 
 import {IRelayer} from "./v0.8.24/Interfaces/IRelayer.sol";
 import {Ownable} from "./v0.8.24/Dependencies/Ownable.sol";
+import {CheckContract} from "./v0.8.24/Dependencies/CheckContract.sol";
 
 import {IRDOracle} from "./Interfaces/IRDOracle.sol";
 
 // Note: If > 50% of tokens in pool are yield bearing must use rate provider for token
 //  https://docs.balancer.fi/partner-onboarding/onboarding-overview/rate-providers.html
 
-contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable {
+contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable, CheckContract {
     using FixedPoint for uint256;
     using Math for uint256;
     using Arrays for uint256[];
@@ -37,6 +38,11 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable {
     OracleState public override oracleState;
 
     // --- Constants ---
+
+    /**
+     * @notice Name of the contract
+     */
+    string public constant NAME = "RDOracle";
 
     /**
      * @notice The constant WAD.
@@ -284,12 +290,19 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable {
         }
     }
 
-    // --- Methods ---
+    // --- Dependency setter ---
 
-    /// @inheritdoc IRDOracle
-    function setRelayer(address _relayer) external onlyOwner {
-        relayer = _relayer;
+    function setAddresses(address _relayerAddress) external onlyOwner {
+        checkContract(_relayerAddress);
+
+        relayer = _relayerAddress;
+
+        emit RelayerAddressChanged(_relayerAddress);
+
+        _renounceOwnership();
     }
+
+    // --- Methods ---
 
     /// @inheritdoc IRDOracle
     function getFastResultWithValidity() public view returns (uint256 _result, bool _validity) {

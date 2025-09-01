@@ -50,6 +50,9 @@ const anvilAccount1 = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 
 const swapperAccount = anvilAccount1; // The account that will perform swaps and provide initial liquidity
 
+const PERMIT2_MAX_AMOUNT = ethers.BigNumber.from("0xffffffffffffffffffffffffffffffffffffffff"); // uint160 max
+const PERMIT2_MAX_EXPIRATION = ethers.BigNumber.from("281474976710655"); // uint48 max
+
 contract("RDOracle", async accounts => {
   let mockRD, mockUSDC, mockUSDT, mockDAI;
   let rdAddress, usdcAddress, usdtAddress, daiAddress;
@@ -108,6 +111,10 @@ contract("RDOracle", async accounts => {
     return [tokenAddress, tokenType, rateProvider, paysYieldFees];
   }
 
+  async function farFutureDeadline() {
+    return (await time.latest()).toNumber() + 1_000_000_000; // ~30 years
+  }
+
   async function executeSwap({
     signer,
     newPoolAddress,
@@ -147,7 +154,12 @@ contract("RDOracle", async accounts => {
 
     const expiration = Math.floor(Date.now() / 1000) + 86400; // 24 hours
 
-    await permit2Contract.approve(tokenIn.address, router.address, amountIn.toString(), expiration);
+    await permit2Contract.approve(
+      tokenIn.address,
+      router.address,
+      PERMIT2_MAX_AMOUNT,
+      PERMIT2_MAX_EXPIRATION
+    );
 
     try {
       swapTx = await router.swapSingleTokenExactIn(
@@ -365,7 +377,12 @@ contract("RDOracle", async accounts => {
         const tokenContract = addressToToken[tokenAddress];
         const amount = exactAmountsIn[i];
 
-        await permit2Contract.approve(tokenAddress, router.address, amount, expiration);
+        await permit2Contract.approve(
+          tokenAddress,
+          router.address,
+          PERMIT2_MAX_AMOUNT,
+          PERMIT2_MAX_EXPIRATION
+        );
 
         if (showLogs) {
           console.log(
@@ -464,7 +481,12 @@ contract("RDOracle", async accounts => {
         const tokenContract = addressToToken[tokenAddress];
         const amount = exactAmountsIn[i];
 
-        await permit2Contract.approve(tokenAddress, router.address, amount, expiration);
+        await permit2Contract.approve(
+          tokenAddress,
+          router.address,
+          PERMIT2_MAX_AMOUNT,
+          PERMIT2_MAX_EXPIRATION
+        );
 
         if (showLogs) {
           console.log(
@@ -636,7 +658,7 @@ contract("RDOracle", async accounts => {
     await coreContracts.parControl.setAddresses(coreContracts.relayer.address); // new
     await coreContracts.rateControl.setAddresses(coreContracts.relayer.address); // new
 
-    await rdOracle.setRelayer(coreContracts.relayer.address);
+    await rdOracle.setAddresses(coreContracts.relayer.address);
 
     if (showLogs) {
       console.log("--------------------------------");
@@ -868,6 +890,66 @@ contract("RDOracle", async accounts => {
       tokenInDecimals: USDC_DECIMALS,
       tokenOutDecimals: RD_DECIMALS
     });
+
+    // Force slow window spanning update
+    await time.increase(QUOTE_PERIOD_SLOW + 5);
+    await executeSwap({
+      signer: ethersSigner,
+      newPoolAddress,
+      _amountIn: "500000", // large enough to move price
+      _minAmountOut: "1",
+      tokenIn: USDC,
+      tokenOut: RD,
+      tokenInDecimals: USDC_DECIMALS,
+      tokenOutDecimals: RD_DECIMALS
+    });
+    await time.increase(1);
+    await executeSwap({
+      signer: ethersSigner,
+      newPoolAddress,
+      _amountIn: "10",
+      _minAmountOut: "0",
+      tokenIn: USDC,
+      tokenOut: RD,
+      tokenInDecimals: USDC_DECIMALS,
+      tokenOutDecimals: RD_DECIMALS
+    });
+
+    // 2) Big move to new price regime (post-swap price will be captured on next hook)
+    await time.increase(5);
+    await executeSwap({
+      signer: ethersSigner,
+      newPoolAddress,
+      _amountIn: "500000",
+      _minAmountOut: "1",
+      tokenIn: USDC,
+      tokenOut: RD,
+      tokenInDecimals: USDC_DECIMALS,
+      tokenOutDecimals: RD_DECIMALS
+    });
+
+    // 3) Wait so the change is > fast but < slow
+    await time.increase(QUOTE_PERIOD_FAST + 30); // > 300s
+    // Keep total wait < QUOTE_PERIOD_SLOW to ensure slow still spans old+new
+
+    // 4) Ensure recent endpoint is valid and write a fresh observation reflecting the new price
+    await time.increase(60 + 5); // >= MIN_PRICE_AGE
+    await executeSwap({
+      signer: ethersSigner,
+      newPoolAddress,
+      _amountIn: "10", // tiny to avoid moving price
+      _minAmountOut: "0",
+      tokenIn: USDC,
+      tokenOut: RD,
+      tokenInDecimals: USDC_DECIMALS,
+      tokenOutDecimals: RD_DECIMALS
+    });
+
+    // // 5) Read and assert
+    const { _fastValue, _slowValue } = await rdOracle.readFastSlow();
+    expect(_fastValue).to.not.equal(_slowValue);
+    expect(_fastValue).to.not.equal(new BN("1000000000000000000"));
+    expect(_slowValue).to.not.equal(new BN("1000000000000000000"));
   }
 
   before(async () => {
@@ -1032,8 +1114,7 @@ contract("RDOracle", async accounts => {
       );
     });
 
-    it("should set the relayer address", async () => {
-      await rdOracle.setRelayer(relayer.address);
+    it("it should have set the relayer address during setup", async () => {
       expect(await rdOracle.relayer()).to.equal(relayer.address);
     });
   });
@@ -1166,8 +1247,8 @@ contract("RDOracle", async accounts => {
       await permit2Contract.approve(
         RD.address,
         router.address,
-        amountIn1.add(amountIn2).toString(),
-        expiration
+        PERMIT2_MAX_AMOUNT,
+        PERMIT2_MAX_EXPIRATION
       );
 
       // Use ethers for the Router
@@ -1206,7 +1287,7 @@ contract("RDOracle", async accounts => {
     });
   });
 
-  describe.skip("Balancer Pool Hook Functionality (afterAddLiquidity)", async () => {
+  describe("Balancer Pool Hook Functionality (afterAddLiquidity)", async () => {
     it("should call the oracle hook onAfterAddLiquidity handler", async () => {
       try {
         await time.increase(1);
@@ -1227,7 +1308,7 @@ contract("RDOracle", async accounts => {
     });
   });
 
-  describe.skip("Balancer Pool Hook Functionality (afterRemoveLiquidity)", async () => {
+  describe("Balancer Pool Hook Functionality (afterRemoveLiquidity)", async () => {
     it("should call the oracle hook onAfterRemoveLiquidity handler", async () => {
       try {
         await time.increase(1);
@@ -1248,7 +1329,7 @@ contract("RDOracle", async accounts => {
     });
   });
 
-  describe.skip("Price Reading Functions", () => {
+  describe("Price Reading Functions", () => {
     it("should build observation history through multiple swaps", async () => {
       const before = await rdOracle.oracleState();
       const beforeIdx = before.observationIndex.toNumber();
@@ -1283,55 +1364,35 @@ contract("RDOracle", async accounts => {
 
     it("should read fast price correctly", async () => {
       const fastPrice = await rdOracle.readFast();
-      expect(fastPrice.toString()).to.be.equal("1008334122065052721");
-      expect(fastPrice).to.be.bignumber.equal(new BN("1008334122065052721"));
+      expect(fastPrice.toString()).to.be.equal("997802527977264342");
+      expect(fastPrice).to.be.bignumber.equal(new BN("997802527977264342"));
     });
 
     it("should read slow price correctly", async () => {
       const slowPrice = await rdOracle.readSlow();
-      expect(slowPrice.toString()).to.be.equal("1002503002301265531");
-      expect(slowPrice).to.be.bignumber.equal(new BN("1002503002301265531"));
+      expect(slowPrice.toString()).to.be.equal("1003706667776608861");
+      expect(slowPrice).to.be.bignumber.equal(new BN("1003706667776608861"));
     });
 
     it("should read both fast and slow prices", async () => {
       const { _fastValue, _slowValue } = await rdOracle.readFastSlow();
-
-      // const expectedFastPrice = new BN("1008100000000000000"); // Central value
-      // const tolerance = new BN("1000000000000000"); // 0.001 tolerance
-      // const lowerBound = expectedFastPrice.sub(tolerance);
-      // const upperBound = expectedFastPrice.add(tolerance);
-
-      // expect(_fastValue).to.be.bignumber.gte(lowerBound);
-      // expect(_fastValue).to.be.bignumber.lte(upperBound);
-      expect(_fastValue).to.be.bignumber.equal(new BN("1008334122065052721"));
-      expect(_slowValue).to.be.bignumber.equal(new BN("1002503002301265531"));
-
-      // expect(_fastValue).to.be.bignumber.gt(new BN(0));
-      // expect(_slowValue).to.be.bignumber.gt(new BN(0));
+      expect(_fastValue).to.be.bignumber.equal(new BN("997802527977264342"));
+      expect(_slowValue).to.be.bignumber.equal(new BN("1003706667776608861"));
     });
   });
 
-  describe.skip("Price Calculation Functions", () => {
+  describe("Price Calculation Functions", () => {
     it("should get fast result with validity", async () => {
       const { _result, _validity } = await rdOracle.getFastResultWithValidity();
       expect(_result).to.be.bignumber.gt(new BN(0));
       expect(_validity).to.be.true;
-
-      // Use a range to account for test non-determinism
-      const expectedFastPrice = new BN("1008100000000000000"); // Central value
-      const tolerance = new BN("1000000000000000"); // 0.001 tolerance
-      const lowerBound = expectedFastPrice.sub(tolerance);
-      const upperBound = expectedFastPrice.add(tolerance);
-
-      expect(_result).to.be.bignumber.equal(new BN("1008334122065052721"));
-      expect(_result).to.be.bignumber.gte(lowerBound);
-      expect(_result).to.be.bignumber.lte(upperBound);
+      expect(_result).to.be.bignumber.equal(new BN("997802527977264342"));
     });
 
     it("should get slow result with validity", async () => {
       const { _result, _validity } = await rdOracle.getSlowResultWithValidity();
       expect(_result).to.be.bignumber.gt(new BN(0));
-      expect(_result).to.be.bignumber.equal(new BN("1002503002301265531"));
+      expect(_result).to.be.bignumber.equal(new BN("1003706667776608861"));
       expect(_validity).to.be.true;
     });
 
@@ -1340,22 +1401,14 @@ contract("RDOracle", async accounts => {
         await rdOracle.getFastSlowResultWithValidity();
       expect(_fastResult).to.be.bignumber.gt(new BN(0));
       expect(_slowResult).to.be.bignumber.gt(new BN(0));
-
-      const expectedFastPrice = new BN("1008100000000000000"); // Central value
-      const tolerance = new BN("1000000000000000"); // 0.001 tolerance
-      const lowerBound = expectedFastPrice.sub(tolerance);
-      const upperBound = expectedFastPrice.add(tolerance);
-
-      expect(_fastResult).to.be.bignumber.gte(lowerBound);
-      expect(_fastResult).to.be.bignumber.lte(upperBound);
-      expect(_fastResult).to.be.bignumber.equal(new BN("1008334122065052721"));
-      expect(_slowResult).to.be.bignumber.equal(new BN("1002503002301265531"));
+      expect(_fastResult).to.be.bignumber.equal(new BN("997802527977264342"));
+      expect(_slowResult).to.be.bignumber.equal(new BN("1003706667776608861"));
       expect(_fastValidity).to.be.true;
       expect(_slowValidity).to.be.true;
     });
   });
 
-  describe.skip("Oracle Observation Management", () => {
+  describe("Oracle Observation Management", () => {
     it("should observe price data correctly", async () => {
       // Test observe() function
       const { tickCumulatives, secondsPerLiquidityCumulativeX128s } = await rdOracle.observe([
@@ -1389,7 +1442,7 @@ contract("RDOracle", async accounts => {
     // });
   });
 
-  describe.skip("Price Update Logic", () => {
+  describe("Price Update Logic", () => {
     before(async () => {
       // Create test helper instance
       rdOracleTestHelper = await RDOracleTestHelper.new(
@@ -1495,7 +1548,7 @@ contract("RDOracle", async accounts => {
     });
   });
 
-  describe.skip("Mathematical Functions", () => {
+  describe("Mathematical Functions", () => {
     it("should calculate median correctly for 3 elements", async () => {
       // Test with 3 elements (odd)
       const oddArray = [
@@ -1611,14 +1664,6 @@ contract("RDOracle", async accounts => {
       const balancesSum = ethers.utils.parseUnits("4000000", 18); // 4M total (1M each token)
       const poolInvariant = ethers.utils.parseUnits("4000000", 18); // ~4M invariant
       const ampPrecision = new BN("1000"); // Standard Balancer amp precision
-
-      // const partialDerivative = await rdOracleTestHelper.testCalculatePartialDerivative(
-      //   tokenBalance,
-      //   ampCoefficient,
-      //   poolInvariant,
-      //   balancesSum,
-      //   ampPrecision
-      // );
 
       const partialDerivative = await rdOracle.testCalculatePartialDerivative(
         tokenBalance,

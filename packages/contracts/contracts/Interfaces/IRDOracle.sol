@@ -31,6 +31,12 @@ interface IRDOracle {
         uint16 _observationIndex
     );
 
+    /**
+     * @notice Emitted when the relayer address is changed
+     * @param _relayerAddress The new relayer address
+     */
+    event RelayerAddressChanged(address _relayerAddress);
+
     // --- Errors ---
 
     /**
@@ -239,9 +245,9 @@ interface IRDOracle {
 
     /**
      * @notice Set the relayer address
-     * @param _relayer The relayer address
+     * @param _relayerAddress The relayer address
      */
-    function setRelayer(address _relayer) external;
+    function setAddresses(address _relayerAddress) external;
 
     /**
      * @notice Fetch the latest fast oracle result and whether it is valid or not
