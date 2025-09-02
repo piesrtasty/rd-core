@@ -37,6 +37,12 @@ interface IRDOracle {
      */
     event RelayerAddressChanged(address _relayerAddress);
 
+    /**
+     * @notice Emitted when the aggregator address is changed
+     * @param _aggregatorAddress The new aggregator address
+     */
+    event AggregatorAddressChanged(address _aggregatorAddress);
+
     // --- Errors ---
 
     /**
@@ -145,6 +151,12 @@ interface IRDOracle {
     function relayer() external view returns (address _relayer);
 
     /**
+     * @notice Getter for the aggregator address
+     * @return _aggregator The aggregator address
+     */
+    function aggregator() external view returns (address _aggregator);
+
+    /**
      * @notice Getter for the stablecoin basket
      * @return _stablecoinBasket The stablecoin basket
      */
@@ -246,8 +258,9 @@ interface IRDOracle {
     /**
      * @notice Set the relayer address
      * @param _relayerAddress The relayer address
+     * @param _aggregatorAddress The aggregator address
      */
-    function setAddresses(address _relayerAddress) external;
+    function setAddresses(address _relayerAddress, address _aggregatorAddress) external;
 
     /**
      * @notice Fetch the latest fast oracle result and whether it is valid or not

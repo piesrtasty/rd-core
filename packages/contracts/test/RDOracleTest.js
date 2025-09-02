@@ -61,7 +61,7 @@ contract("RDOracle", async accounts => {
   let RD, USDC, USDT, DAI;
   let vault, iVault, rdOracle, stablePoolFactory;
   let newPoolAddress, poolId;
-  let coreContracts, relayer;
+  let coreContracts, relayer, aggregator;
 
   const provider = new ethers.providers.JsonRpcProvider();
   const ethersSigner = provider.getSigner(anvilAccount1);
@@ -620,6 +620,7 @@ contract("RDOracle", async accounts => {
   async function setupRelayerAndOracle(logSetup = false) {
     const showLogs = logsOn && logSetup;
     relayer = coreContracts.relayer;
+    aggregator = coreContracts.aggregator;
 
     const parControlAddress = coreContracts.parControl.address;
     const rateControlAddress = coreContracts.rateControl.address;
@@ -658,7 +659,7 @@ contract("RDOracle", async accounts => {
     await coreContracts.parControl.setAddresses(coreContracts.relayer.address); // new
     await coreContracts.rateControl.setAddresses(coreContracts.relayer.address); // new
 
-    await rdOracle.setAddresses(coreContracts.relayer.address);
+    await rdOracle.setAddresses(coreContracts.relayer.address, coreContracts.aggregator.address);
 
     if (showLogs) {
       console.log("--------------------------------");
@@ -1117,6 +1118,10 @@ contract("RDOracle", async accounts => {
     it("it should have set the relayer address during setup", async () => {
       expect(await rdOracle.relayer()).to.equal(relayer.address);
     });
+
+    it("it should have set the aggregator address during setup", async () => {
+      expect(await rdOracle.aggregator()).to.equal(aggregator.address);
+    });
   });
 
   describe("RDOracle cardinality", async () => {
@@ -1165,8 +1170,8 @@ contract("RDOracle", async accounts => {
     });
   });
 
-  describe("Balancer Pool Hook Functionality (afterSwap)", async () => {
-    it("should call the oracle hook onAfterSwap handler", async () => {
+  describe("Balancer Pool Hook Functionality (beforeSwap)", async () => {
+    it("should call the oracle hook onBeforeSwap handler", async () => {
       try {
         await time.increase(1);
         const swapTx = await executeSwap({
@@ -1287,8 +1292,8 @@ contract("RDOracle", async accounts => {
     });
   });
 
-  describe("Balancer Pool Hook Functionality (afterAddLiquidity)", async () => {
-    it("should call the oracle hook onAfterAddLiquidity handler", async () => {
+  describe("Balancer Pool Hook Functionality (beforeAddLiquidity)", async () => {
+    it("should call the oracle hook onBeforeAddLiquidity handler", async () => {
       try {
         await time.increase(1);
         const txHash = await addLiquidity();
@@ -1308,8 +1313,8 @@ contract("RDOracle", async accounts => {
     });
   });
 
-  describe("Balancer Pool Hook Functionality (afterRemoveLiquidity)", async () => {
-    it("should call the oracle hook onAfterRemoveLiquidity handler", async () => {
+  describe("Balancer Pool Hook Functionality (beforeRemoveLiquidity)", async () => {
+    it("should call the oracle hook onBeforeRemoveLiquidity handler", async () => {
       try {
         await time.increase(1);
         const txHash = await removeLiquidity();

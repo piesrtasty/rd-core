@@ -20,6 +20,7 @@ import {Oracle} from "./Vendor/@uniswap/v3-core/contracts/libraries/Oracle.sol";
 import {TickMath} from "./Vendor/@uniswap/v3-core/contracts/libraries/TickMath.sol";
 
 import {IRelayer} from "./v0.8.24/Interfaces/IRelayer.sol";
+import {IAggregator} from "./v0.8.24/Interfaces/IAggregator.sol";
 import {Ownable} from "./v0.8.24/Dependencies/Ownable.sol";
 import {CheckContract} from "./v0.8.24/Dependencies/CheckContract.sol";
 
@@ -67,6 +68,9 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable, CheckContract {
 
     /// @inheritdoc IRDOracle
     address public relayer;
+
+    /// @inheritdoc IRDOracle
+    address public aggregator;
 
     address[] internal _stablecoinBasket;
 
@@ -292,12 +296,16 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable, CheckContract {
 
     // --- Dependency setter ---
 
-    function setAddresses(address _relayerAddress) external onlyOwner {
+    /// @inheritdoc IRDOracle
+    function setAddresses(address _relayerAddress, address _aggregatorAddress) external onlyOwner {
         checkContract(_relayerAddress);
+        checkContract(_aggregatorAddress);
 
         relayer = _relayerAddress;
+        aggregator = _aggregatorAddress;
 
         emit RelayerAddressChanged(_relayerAddress);
+        emit AggregatorAddressChanged(_aggregatorAddress);
 
         _renounceOwnership();
     }
