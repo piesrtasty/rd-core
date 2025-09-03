@@ -21,6 +21,7 @@ import {TickMath} from "./Vendor/@uniswap/v3-core/contracts/libraries/TickMath.s
 
 import {IRelayer} from "./v0.8.24/Interfaces/IRelayer.sol";
 import {IAggregator} from "./v0.8.24/Interfaces/IAggregator.sol";
+import {ILUSDToken} from "./v0.8.24/Interfaces/ILUSDToken.sol";
 import {Ownable} from "./v0.8.24/Dependencies/Ownable.sol";
 import {CheckContract} from "./v0.8.24/Dependencies/CheckContract.sol";
 
@@ -266,7 +267,7 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable, CheckContract {
      */
     function _onHookCalled(address _pool) internal {
         // If time since last observation > minDelta then update price in observations
-        bool _shouldUpdate = false;
+        bool _shouldUpdateOracle = false;
 
         uint16 _observationIndex = oracleState.observationIndex;
         (uint32 _lastUpdateTime, , , ) = this.observations(_observationIndex);
@@ -274,24 +275,59 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable, CheckContract {
         uint32 _timeSinceLastUpdate = _blockTimestamp() - _lastUpdateTime;
 
         if (_blockTimestamp() > _lastUpdateTime) {
-            _shouldUpdate = true;
+            _shouldUpdateOracle = true;
         }
 
         // Emit event for debugging
-        emit OracleHookCalled(_pool, _shouldUpdate, _timeSinceLastUpdate);
+        emit OracleHookCalled(_pool, _shouldUpdateOracle, _timeSinceLastUpdate);
 
-        if (_shouldUpdate) {
+        if (_shouldUpdateOracle) {
             // Get last balances of all tokens in the pool
             (, , , uint256[] memory _lastBalancesWad) = IVault(vault).getPoolTokenInfo(_pool);
             _updateSyntheticRDPrice(_lastBalancesWad);
 
-            // Update the relayer - Rate control uses the fast TWAP, Par control uses the slow TWAP
-            (uint256 fastVal, bool fastOk, uint256 slowVal, bool slowOk) = this
-                .getFastSlowResultWithValidity();
-            if (fastOk && slowOk && relayer != address(0)) {
-                IRelayer(relayer).updateRateAndParWithMarket(fastVal, slowVal);
+            if (relayer != address(0)) {
+                _checkAndUpdateRelayer();
             }
         }
+    }
+
+    /**
+     * @notice Check and update the relayer
+     * @param  _pool The pool address
+     */
+    function _checkAndUpdateRelayer() internal {
+        (bool shouldUpdateRate, bool shouldUpdatePar, uint256 updateReward) = IRelayer(relayer)
+            .shouldUpdateRateAndPar();
+
+        (uint256 fastVal, bool fastOk, uint256 slowVal, bool slowOk) = this
+            .getFastSlowResultWithValidity();
+
+        bool _didUpdate = false;
+
+        // Update the relayer - Rate control uses the fast TWAP, Par control uses the slow TWAP
+        if (shouldUpdateRate && shouldUpdatePar && fastOk && slowOk) {
+            IRelayer(relayer).updateRateAndParWithMarket(fastVal, slowVal);
+            _didUpdate = true;
+        } else if (shouldUpdateRate && fastOk) {
+            IRelayer(relayer).updateRateWithMarket(fastVal);
+            _didUpdate = true;
+        } else if (shouldUpdatePar && slowOk) {
+            IRelayer(relayer).updateParWithMarket(slowVal);
+            _didUpdate = true;
+        }
+
+        if (_didUpdate) {
+            // increase local reward balance
+        }
+    }
+
+    /**
+     * @notice Send the caller reward
+     * @param  _updateReward The update reward
+     */
+    function _claimLocalReward(uint256 _updateReward) internal {
+        // Send reward here
     }
 
     // --- Dependency setter ---

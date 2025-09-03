@@ -29,6 +29,9 @@ contract Relayer is Ownable, CheckContract {
     uint256 public par = DECIMAL_PRECISION;
     uint256 public rate = RATE_PRECISION;
 
+    uint256 public rateUpdateReward = 1e18;
+    uint256 public parUpdateReward = 1e18;
+
     event ParControlAddressChanged(address newAddress);
     event RateControlAddressChanged(address newAddress);
     event MarketOracleAddressChanged(address newAddress);
@@ -203,6 +206,20 @@ contract Relayer is Ownable, CheckContract {
         return rate;
     }
 
+    function shouldUpdateRateAndPar() external view returns (bool, bool, uint256) {
+        bool shouldUpdateRate = rateIsStale();
+        bool shouldUpdatePar = parIsStale();
+        uint256 updateReward = 0;
+        if (shouldUpdateRate && shouldUpdatePar) {
+            updateReward = rateUpdateReward + parUpdateReward;
+        } else if (shouldUpdateRate) {
+            updateReward = rateUpdateReward;
+        } else if (shouldUpdatePar) {
+            updateReward = parUpdateReward;
+        }
+        return (shouldUpdateRate, shouldUpdatePar, updateReward);
+    }
+     
     function updateRateAndPar() external returns (uint256, uint256) {
         uint256 marketPrice = marketOracle.price();
         return (_updateRate(marketPrice),  _updatePar(marketPrice));
