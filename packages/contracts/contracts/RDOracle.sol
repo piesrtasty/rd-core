@@ -324,9 +324,8 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable, CheckContract {
 
     /**
      * @notice Send the caller reward
-     * @param  _updateReward The update reward
      */
-    function _claimLocalReward(uint256 _updateReward) internal {
+    function claimLocalReward() external {
         // Send reward here
     }
 
