@@ -183,6 +183,12 @@ interface IRDOracle {
     function rdTokenIndex() external view returns (uint8 _rdTokenIndex);
 
     /**
+     * @notice Getter for the pending local reward
+     * @return _pendingLocalReward The pending local reward
+     */
+    function pendingLocalReward() external view returns (uint256 _pendingLocalReward);
+
+    /**
      * @notice The fast(shorter) length of the TWAP used to consult the pool
      * @return _quotePeriod The length of the TWAP used to consult the pool
      */

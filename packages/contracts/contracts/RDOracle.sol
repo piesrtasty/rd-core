@@ -94,6 +94,9 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable, CheckContract {
     /// @inheritdoc IRDOracle
     uint8 public rdTokenIndex;
 
+    /// @inheritdoc IRDOracle
+    uint256 public pendingLocalReward;
+
     uint8[] internal _stablecoinBasketIndices;
 
     /**
@@ -290,11 +293,12 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable, CheckContract {
                 _checkAndUpdateRelayer();
             }
         }
+
+        IAggregator(aggregator).drip();
     }
 
     /**
      * @notice Check and update the relayer
-     * @param  _pool The pool address
      */
     function _checkAndUpdateRelayer() internal {
         (bool shouldUpdateRate, bool shouldUpdatePar, uint256 updateReward) = IRelayer(relayer)
@@ -318,7 +322,7 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable, CheckContract {
         }
 
         if (_didUpdate) {
-            // increase local reward balance
+            pendingLocalReward += updateReward;
         }
     }
 
@@ -326,7 +330,7 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable, CheckContract {
      * @notice Send the caller reward
      */
     function claimLocalReward() external {
-        // Send reward here
+        // Send reward here -> pendingLocalReward
     }
 
     // --- Dependency setter ---

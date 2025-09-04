@@ -83,6 +83,12 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
         _renounceOwnership();
     }
 
+    // --- TroveManager Drip functions ---
+
+    function drip() external override {
+        // Iterate over all trove managers and drip
+    }
+
     // --- Redemption fee functions ---
 
     /*

@@ -36,7 +36,10 @@ interface IAggregator is ILiquityBase {
 
     function lusdToken() external view returns (ILUSDToken);
 
+    function drip() external;
+
     function updateBaseRateFromRedemption(uint, uint) external returns (uint);
+
 
     function getRedemptionRate() external view returns (uint);
     function getRedemptionRateWithDecay() external view returns (uint);
