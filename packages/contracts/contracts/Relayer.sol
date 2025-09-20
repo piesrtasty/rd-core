@@ -29,9 +29,6 @@ contract Relayer is Ownable, CheckContract {
     uint256 public par = DECIMAL_PRECISION;
     uint256 public rate = RATE_PRECISION;
 
-    uint256 public rateUpdateReward = 1e18;
-    uint256 public parUpdateReward = 1e18;
-
     event ParControlAddressChanged(address newAddress);
     event RateControlAddressChanged(address newAddress);
     event MarketOracleAddressChanged(address newAddress);
@@ -206,16 +203,54 @@ contract Relayer is Ownable, CheckContract {
         return rate;
     }
 
+    function getParUpdateReward() external view returns (uint256) {
+        uint256 _parTwapLength = 24 hours;
+        uint256 _t1 = 2 hours;
+        uint256 _t2 = _t1 * 2; // 4 hours
+        uint256 _t3 = .4 * _parTwapLength; // 9.6 hours
+        uint _maxReward = 20e18;
+
+        uint256 _now = block.timestamp;
+        uint256 _dt = _now - lastParUpdateTime;
+
+        if (_dt <= _t2) { // No subsidy
+            return 0;
+        } else if (_dt >= _t3) { // Max subsidy
+            return _maxReward;
+        } else {
+            return (_maxReward * (_dt - _t2)) / (_t3 - _t2); // Linear subsidy: ramp from 0 at t2 to m at t3
+        }
+    }
+
+    function getRateUpdateReward() external view returns (uint256) {
+        uint256 _rateTwapLength = 12 hours;
+        uint256 _t1 = 30 minutes;
+        uint256 _t2 = _t1 * 2; // 1 hours
+        uint256 _t3 = .4 * _rateTwapLength; // 4.6 hours
+        uint256 _maxReward = 20e18;
+
+        uint256 _now = block.timestamp;
+        uint256 _dt = _now - lastRateUpdateTime;
+
+        if (_dt <= _t2) { // No subsidy
+            return 0;
+        } else if (_dt >= _t3) { // Max subsidy
+            return _maxReward;
+        } else {
+            return (_maxReward * (_dt - _t2)) / (_t3 - _t2); // Linear subsidy: ramp from 0 at t2 to m at t3
+        }
+    }
+
     function shouldUpdateRateAndPar() external view returns (bool, bool, uint256) {
         bool shouldUpdateRate = rateIsStale();
         bool shouldUpdatePar = parIsStale();
         uint256 updateReward = 0;
         if (shouldUpdateRate && shouldUpdatePar) {
-            updateReward = rateUpdateReward + parUpdateReward;
+            updateReward = getRateUpdateReward() + getParUpdateReward();
         } else if (shouldUpdateRate) {
-            updateReward = rateUpdateReward;
+            updateReward = getRateUpdateReward();
         } else if (shouldUpdatePar) {
-            updateReward = parUpdateReward;
+            updateReward = getParUpdateReward();
         }
         return (shouldUpdateRate, shouldUpdatePar, updateReward);
     }

@@ -272,12 +272,14 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable, CheckContract {
         // If time since last observation > minDelta then update price in observations
         bool _shouldUpdateOracle = false;
 
+        uint32 _now = _blockTimestamp();
+
         uint16 _observationIndex = oracleState.observationIndex;
         (uint32 _lastUpdateTime, , , ) = this.observations(_observationIndex);
 
-        uint32 _timeSinceLastUpdate = _blockTimestamp() - _lastUpdateTime;
+        uint32 _timeSinceLastUpdate = _now - _lastUpdateTime;
 
-        if (_blockTimestamp() > _lastUpdateTime) {
+        if (_now > _lastUpdateTime) {
             _shouldUpdateOracle = true;
         }
 
@@ -292,9 +294,30 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable, CheckContract {
             if (relayer != address(0)) {
                 _checkAndUpdateRelayer();
             }
+
+            if (aggregator != address(0)) {
+                _checkAndUpdateAggregator();
+            }
+        }
+    }
+
+    /**
+     * @notice Check and update the aggregator
+     */
+    function _checkAndUpdateAggregator() internal {
+        (bool shouldOracleDrip, uint256 oracleDripReward) = IAggregator(aggregator)
+            .shouldOracleDrip();
+
+        bool _didDrip = false;
+
+        if (shouldOracleDrip) {
+            IAggregator(aggregator).drip();
+            _didDrip = true;
         }
 
-        IAggregator(aggregator).drip();
+        if (_didDrip) {
+            pendingLocalReward += oracleDripReward;
+        }
     }
 
     /**

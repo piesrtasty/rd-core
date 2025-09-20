@@ -123,6 +123,8 @@ interface ITroveManager is ILiquityBase {
     
     function drip() external;
 
+    function aggDrip(uint256 _interestRate) external;
+
     function closeTrove(address _borrower) external;
 
     function closeTroveLiquidation(address _borrower) external;

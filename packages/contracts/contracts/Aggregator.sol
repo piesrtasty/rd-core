@@ -24,11 +24,16 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
     //address public troveManagerAddress;
     ITroveManager public troveManager;
 
+    IRelayer public relayer;
+    
     ILUSDToken public override lusdToken;
 
     // --- Data structures ---
 
     uint constant public SECONDS_IN_ONE_MINUTE = 60;
+
+    uint32 constant public ORACLE_DRIP_INTERVAL = 60;
+
     /*
      * Half-life of 12h. 12h = 720 min
      * (1/2) = d^720 => d = (1/2)^(1/720)
@@ -47,6 +52,9 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
     // The timestamp of the latest fee operation (redemption only)
     uint public override lastFeeOperationTime;
 
+    // The timestamp of the latest oracle drip
+    uint32 public lastOracleDripTime;
+
     // per troveManager rate multiplier
     mapping (address => uint256) public rateMultiplier;
     // per troveManager minimum red fees
@@ -64,7 +72,8 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
 
     function setAddresses(
         address _troveManagerAddress,
-        address _lusdTokenAddress
+        address _lusdTokenAddress,
+        address _relayerAddress
     )
         external
         override
@@ -72,10 +81,12 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
     {
         checkContract(_troveManagerAddress);
         checkContract(_lusdTokenAddress);
+        checkContract(_relayerAddress);
 
         //troveManagerAddress = _troveManagerAddress;
         troveManager = ITroveManager(_troveManagerAddress);
         lusdToken = ILUSDToken(_lusdTokenAddress);
+        relayer = IRelayer(_relayerAddress);
 
         emit TroveManagerAddressChanged(_troveManagerAddress);
         emit LUSDTokenAddressChanged(_lusdTokenAddress);
@@ -85,8 +96,42 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
 
     // --- TroveManager Drip functions ---
 
+    function getOracleDripReward() external view override returns (uint256) {
+        uint256 _t1 = 1 hours;
+        uint256 _t2 = _t1 * 2;
+        uint256 _t3 = 12 hours;
+        uint256 _maxReward = 20e18;
+
+        uint256 _now = block.timestamp;
+        uint256 _dt = _now - lastOracleDripTime;
+
+        if (_dt <= _t2) { // No subsidy
+            return 0;
+        } else if (_dt >= _t3) { // Max subsidy
+            return _maxReward;
+        } else {
+            return (_maxReward * (_dt - _t2)) / (_t3 - _t2); // Linear subsidy: ramp from 0 at t2 to m at t3
+        }
+    }
+
+    function shouldOracleDrip() external view override returns (bool, uint256) {
+        uint32 _now = uint32(block.timestamp);
+        bool _shouldDrip = false;
+        if (_now - lastOracleDripTime >= ORACLE_DRIP_INTERVAL) {
+            _shouldDrip = true;
+            lastOracleDripTime = _now;
+        }
+        return (_shouldDrip, getOracleDripReward());
+    }
+
     function drip() external override {
+        uint256 _interestRate = relayer.getRate();
         // Iterate over all trove managers and drip
+        for (uint i = 0; i < troveManagers.length; i++) {
+            if (ITroveManager(troveManagers[i]).dripIsStale()) {
+                ITroveManager(troveManagers[i]).aggDrip(_interestRate);
+            }
+        }
     }
 
     // --- Redemption fee functions ---

@@ -970,6 +970,12 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
         _drip(interestRate, shieldedInterestRate);
     }
 
+    function aggDrip(uint256 _interestRate) public override {
+        _requireCallerIsAggregator();
+        uint shieldedInterestRate = _interestRate.sub(RATE_PRECISION).mul(kappa).div(DECIMAL_PRECISION).add(RATE_PRECISION);
+        _drip(_interestRate, shieldedInterestRate);
+    }
+
     function _updateAccRates(uint256 newAccRate, uint256 newAccShieldRate) internal {
         accumulatedRate = newAccRate;
         accumulatedShieldRate = newAccShieldRate;
@@ -1177,4 +1183,10 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
         Troves[_borrower].debt = newDebt;
         return newDebt;
     }
+
+    // --- 'require' wrapper functions ---
+
+    function _requireCallerIsAggregator() internal view {
+        require(msg.sender == address(aggregator), "TM: Caller is not Aggregator contract");
+    }   
 }
