@@ -25,6 +25,8 @@ import {ILUSDToken} from "./v0.8.24/Interfaces/ILUSDToken.sol";
 import {Ownable} from "./v0.8.24/Dependencies/Ownable.sol";
 import {CheckContract} from "./v0.8.24/Dependencies/CheckContract.sol";
 
+import {IERC20} from "./v0.8.24/Dependencies/IERC20.sol";
+
 import {IRDOracle} from "./Interfaces/IRDOracle.sol";
 
 // Note: If > 50% of tokens in pool are yield bearing must use rate provider for token
@@ -353,7 +355,16 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable, CheckContract {
      * @notice Send the caller reward
      */
     function claimLocalReward() external {
-        // Send reward here -> pendingLocalReward
+        uint256 owed = pendingLocalReward;
+        if (owed == 0) return;
+
+        uint256 bal = IERC20(rdToken).balanceOf(address(this));
+        uint256 pay = bal < owed ? bal : owed;
+        if (pay == 0) return;
+
+        pendingLocalReward = owed - pay; // keep the remaining owed amount
+        bool ok = IERC20(rdToken).transfer(msg.sender, pay);
+        if (!ok) revert Oracle_ClaimRewardTransferFailed();
     }
 
     // --- Dependency setter ---

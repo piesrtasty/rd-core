@@ -106,6 +106,11 @@ interface IRDOracle {
      */
     error Oracle_RDTokenNotFound();
 
+    /**
+     * @notice Error thrown when the claim reward transfer fails
+     */
+    error Oracle_ClaimRewardTransferFailed();
+
     // --- Structs ---
 
     /**
