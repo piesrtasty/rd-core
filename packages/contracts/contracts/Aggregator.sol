@@ -23,8 +23,6 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
 
     //address public troveManagerAddress;
     ITroveManager public troveManager;
-
-    IRelayer public relayer;
     
     ILUSDToken public override lusdToken;
 

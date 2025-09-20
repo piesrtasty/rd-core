@@ -203,7 +203,7 @@ contract Relayer is Ownable, CheckContract {
         return rate;
     }
 
-    function getParUpdateReward() external view returns (uint256) {
+    function getParUpdateReward() public view returns (uint256) {
         uint256 _parTwapLength = 24 hours;
         uint256 _t1 = 2 hours;
         uint256 _t2 = _t1 * 2; // 4 hours
@@ -222,7 +222,7 @@ contract Relayer is Ownable, CheckContract {
         }
     }
 
-    function getRateUpdateReward() external view returns (uint256) {
+    function getRateUpdateReward() public view returns (uint256) {
         uint256 _rateTwapLength = 12 hours;
         uint256 _t1 = 30 minutes;
         uint256 _t2 = _t1 * 2; // 1 hours
