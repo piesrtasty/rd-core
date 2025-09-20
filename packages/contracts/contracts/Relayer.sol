@@ -207,7 +207,7 @@ contract Relayer is Ownable, CheckContract {
         uint256 _parTwapLength = 24 hours;
         uint256 _t1 = 2 hours;
         uint256 _t2 = _t1 * 2; // 4 hours
-        uint256 _t3 = .4 * _parTwapLength; // 9.6 hours
+        uint256 _t3 = (_parTwapLength * 2) / 5; // 40% of par TWAP length (9.6 hours)
         uint _maxReward = 20e18;
 
         uint256 _now = block.timestamp;
@@ -226,7 +226,7 @@ contract Relayer is Ownable, CheckContract {
         uint256 _rateTwapLength = 12 hours;
         uint256 _t1 = 30 minutes;
         uint256 _t2 = _t1 * 2; // 1 hours
-        uint256 _t3 = .4 * _rateTwapLength; // 4.6 hours
+        uint256 _t3 = (_rateTwapLength * 2) / 5; // 40% of rate TWAP length (4.6 hours)
         uint256 _maxReward = 20e18;
 
         uint256 _now = block.timestamp;

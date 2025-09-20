@@ -94,7 +94,7 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
 
     // --- TroveManager Drip functions ---
 
-    function getOracleDripReward() external view override returns (uint256) {
+    function getOracleDripReward() public view override returns (uint256) {
         uint256 _t1 = 1 hours;
         uint256 _t2 = _t1 * 2;
         uint256 _t3 = 12 hours;
@@ -112,7 +112,7 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
         }
     }
 
-    function shouldOracleDrip() external view override returns (bool, uint256) {
+    function shouldOracleDrip() external  override returns (bool, uint256) {
         uint32 _now = uint32(block.timestamp);
         bool _shouldDrip = false;
         if (_now - lastOracleDripTime >= ORACLE_DRIP_INTERVAL) {

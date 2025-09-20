@@ -960,7 +960,7 @@ contract TroveManager is LiquityBase, Ownable, CheckContract, ITroveManager {
       
     }
 
-    function dripIsStale() external view returns (bool) {
+    function dripIsStale() external view override returns (bool) {
         return block.timestamp - lastAccRateUpdateTime > DRIP_STALENESS_THRESHOLD;
     }
 

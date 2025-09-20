@@ -78,6 +78,8 @@ interface ITroveManager is ILiquityBase {
     function accumulatedRate() external view returns (uint);
     function accumulatedShieldRate() external view returns (uint);
 
+    function dripIsStale() external view returns (bool);
+
     function getTroveOwnersCount() external view returns (uint);
 
     function getShieldedTroveOwnersCount() external view returns (uint);
