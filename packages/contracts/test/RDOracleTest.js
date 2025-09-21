@@ -617,7 +617,7 @@ contract("RDOracle", async accounts => {
     }
   }
 
-  async function setupRelayerAndOracle(logSetup = false) {
+  async function setupRelayerAggregatorAndOracle(logSetup = false) {
     const showLogs = logsOn && logSetup;
     relayer = coreContracts.relayer;
     aggregator = coreContracts.aggregator;
@@ -630,7 +630,7 @@ contract("RDOracle", async accounts => {
 
     if (showLogs) {
       console.log("--------------------------------");
-      console.log("relayer addresses to set");
+      console.log("Addresses to set");
       console.log("--------------------------------");
       console.log("parControl", parControlAddress);
       console.log("rateControl", rateControlAddress);
@@ -638,14 +638,13 @@ contract("RDOracle", async accounts => {
       console.log("troveManagerAddress", troveManagerAddress);
       console.log("borrowerOperationsAddress", borrowerOperationsAddress);
       console.log("--------------------------------");
-      console.log("relayer addresses before setting");
+      console.log("Addresses before setting");
       console.log("--------------------------------");
       console.log("parControl", await relayer.parControl());
       console.log("rateControl", await relayer.rateControl());
       console.log("marketOracle", await relayer.marketOracle());
       console.log("troveManager", await relayer.troveManager());
       console.log("borrowerOperations", await relayer.borrowerOperations());
-      console.log("--------------------------------");
     }
 
     await relayer.setAddresses(
@@ -659,17 +658,24 @@ contract("RDOracle", async accounts => {
     await coreContracts.parControl.setAddresses(coreContracts.relayer.address); // new
     await coreContracts.rateControl.setAddresses(coreContracts.relayer.address); // new
 
+    await coreContracts.aggregator.setAddresses(coreContracts.troveManager.address, coreContracts.lusdToken.address, coreContracts.relayer.address); // new
+
+
     await rdOracle.setAddresses(coreContracts.relayer.address, coreContracts.aggregator.address);
 
     if (showLogs) {
       console.log("--------------------------------");
-      console.log("relayer addresses after setting");
+      console.log("Addresses after setting");
       console.log("--------------------------------");
-      console.log("parControl", await relayer.parControl());
-      console.log("rateControl", await relayer.rateControl());
-      console.log("marketOracle", await relayer.marketOracle());
-      console.log("troveManager", await relayer.troveManager());
-      console.log("borrowerOperations", await relayer.borrowerOperations());
+      console.log("relayer - parControl", await relayer.parControl());
+      console.log("relayer - rateControl", await relayer.rateControl());
+      console.log("relayer - marketOracle", await relayer.marketOracle());
+      console.log("relayer - troveManager", await relayer.troveManager());
+      console.log("relayer - borrowerOperations", await relayer.borrowerOperations());
+      console.log("rdOracle - aggregator", await rdOracle.aggregator());
+      console.log("rdOracle - address", await rdOracle.address);
+      console.log("rdOracle - relayer", await rdOracle.relayer());
+      console.log("aggregator - relayer", await aggregator.relayer());
       console.log("--------------------------------");
     }
   }
@@ -972,9 +978,9 @@ contract("RDOracle", async accounts => {
     console.log("Step 4: Deploying core protocol...");
     await deployCoreProtocol(false);
 
-    // Step 5: Set the relayer address
-    console.log("Step 5: Setup Relayer and Oracle...");
-    await setupRelayerAndOracle(false);
+    // Step 5: Set the relayer, aggregator, and oracle addresses
+    console.log("Step 5: Setup Relayer, Aggregator, and Oracle...");
+    await setupRelayerAggregatorAndOracle(true);
 
     // Step 6: Create the pool
     console.log("Step 6: Creating pool...");

@@ -455,6 +455,20 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable, CheckContract {
         return (_fastResult, _slowResult);
     }
 
+    /// @inheritdoc IRDOracle
+    function price() external view returns (uint256 _price) {
+        (uint256 value, bool ok) = this.getFastResultWithValidity();
+        if (!ok) {
+            // fallback to current stored sqrtPrice (or 1e18 if uninitialized)
+            return
+                oracleState.sqrtPriceX96 == 0
+                    ? 1e18
+                    : _convertSqrtPriceX96ToPrice(oracleState.sqrtPriceX96);
+        }
+        return value;
+    }
+
+    /// @inheritdoc IRDOracle
     function getLastUpdateTime() external view returns (uint32 _updateTime) {
         uint16 _observationIndex = oracleState.observationIndex;
         (uint32 _lastUpdateTime, , , ) = this.observations(_observationIndex);

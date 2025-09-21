@@ -324,6 +324,14 @@ interface IRDOracle {
      */
     function readFastSlow() external view returns (uint256 _fastValue, uint256 _slowValue);
 
+
+    /**
+     * @notice Fetch the price
+     * @dev    Will revert if is the price feed is invalid
+     * @return _price The price
+     */
+    function price() external view returns (uint256 _price);
+
     /**
      * @notice Fetch the last update time
      * @dev    Will revert if is the price feed is invalid

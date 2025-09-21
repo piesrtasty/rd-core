@@ -124,10 +124,19 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
 
     function drip() external override {
         uint256 _interestRate = relayer.getRate();
-        // Iterate over all trove managers and drip
-        for (uint i = 0; i < troveManagers.length; i++) {
-            if (ITroveManager(troveManagers[i]).dripIsStale()) {
-                ITroveManager(troveManagers[i]).aggDrip(_interestRate);
+        for (uint256 _i = 0; _i < troveManagers.length; _i++) {
+            address _troveManager = troveManagers[_i];
+            if (_troveManager == address(0)) continue;
+
+            bool _dripIsStale;
+            try ITroveManager(_troveManager).dripIsStale() returns (bool _isStale) {
+                _dripIsStale = _isStale;
+            } catch {
+                continue; // swallow FailedInnerCall on non-conforming targets
+            }
+
+            if (_dripIsStale) {
+                ITroveManager(_troveManager).aggDrip(_interestRate);
             }
         }
     }
