@@ -114,6 +114,7 @@ contract("RDOracle", async accounts => {
   async function increaseTime(seconds) {
     // await time.increase(seconds);
     const now = (await ethers.provider.getBlock("latest")).timestamp;
+    console.log("Time:", now);
     const next = now + seconds;
     await network.provider.send("evm_setNextBlockTimestamp", [next]);
     await network.provider.send("evm_mine");
@@ -1293,7 +1294,7 @@ contract("RDOracle", async accounts => {
       // Test that oracle state updates when price changes significantly
       const initialState = await rdOracle.oracleState();
       // await executeLargeSwaps();
-      await executeSwap({ 
+      await executeSwap({
         signer: ethersSigner,
         newPoolAddress,
         _amountIn: "10000",
@@ -1777,6 +1778,46 @@ contract("RDOracle", async accounts => {
 
         expect(updateParEvent).to.not.be.null;
         expect(updateRateEvent).to.not.be.null;
+      } catch (e) {
+        console.error("Error during updatePar and updateRate:", e);
+        throw e;
+      }
+    });
+  });
+
+  describe("Balancer Pool Hook Functionality (Aggregator Integration)", async () => {
+    it("should call drip on the aggregator", async () => {
+      try {
+        const lastDripTime = await aggregator.lastOracleDripTime();
+        const oracleDripInterval = await aggregator.ORACLE_DRIP_INTERVAL();
+        const nextDripTime = parseInt(lastDripTime) + parseInt(oracleDripInterval) * 2;
+        const now = (await ethers.provider.getBlock("latest")).timestamp;
+        const timeJump = now < nextDripTime ? nextDripTime - now : 0;
+
+        increaseTime(timeJump);
+
+        await executeSwap({
+          signer: ethersSigner,
+          newPoolAddress,
+          _amountIn: "0.000001", // 1e-6 RD
+          _minAmountOut: "0", // avoid slippage reverts
+          tokenIn: RD,
+          tokenOut: USDC,
+          tokenInDecimals: RD_DECIMALS, // 18
+          tokenOutDecimals: USDC_DECIMALS // 6
+        });
+
+        const receipt = await web3.eth.getTransactionReceipt(swapTx.tx);
+        const aggregatorEvents = receipt.logs.filter(
+          log => log.address.toLowerCase() === aggregator.address.toLowerCase()
+        );
+
+        const dripEvent = aggregatorEvents.find(
+          event => event.topics[0] === web3.utils.sha3("AggregatorDrip(uint256)")
+        );
+
+        expect(dripEvent).to.not.be.null;
+
       } catch (e) {
         console.error("Error during updatePar and updateRate:", e);
         throw e;

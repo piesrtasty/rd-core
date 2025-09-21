@@ -65,6 +65,7 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
     // --- Events ---
     event BaseRateUpdated(uint _baseRate);
     event LastFeeOpTimeUpdated(uint _lastFeeOpTime);
+    event AggregatorDrip(uint256 _timestamp);
 
     // --- Dependency setter ---
 
@@ -139,6 +140,7 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
                 ITroveManager(_troveManager).aggDrip(_interestRate);
             }
         }
+        emit AggregatorDrip(block.timestamp);
     }
 
     // --- Redemption fee functions ---
