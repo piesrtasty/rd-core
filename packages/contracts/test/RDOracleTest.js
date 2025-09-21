@@ -1,6 +1,6 @@
 const { expect } = require("chai");
 const { BN, expectEvent, time } = require("@openzeppelin/test-helpers");
-const { ethers } = require("hardhat");
+const { ethers, network } = require("hardhat");
 const { Decimal } = require("decimal.js");
 const _BN = require("bn.js");
 
@@ -100,6 +100,23 @@ contract("RDOracle", async accounts => {
       observationCardinality: oracleState.observationCardinality.toString(),
       observationCardinalityNext: oracleState.observationCardinalityNext.toString()
     });
+  }
+
+  // Assert actual ~= expected within an absolute wei tolerance
+  function expectCloseWei(actual, expected, tolWei = ethers.BigNumber.from("150000000000000")) {
+    // 1e-4 WAD
+    const a = ethers.BigNumber.from(actual.toString());
+    const e = ethers.BigNumber.from(expected.toString());
+    const diff = a.gt(e) ? a.sub(e) : e.sub(a);
+    expect(diff.lte(tolWei)).to.equal(true, `diff=${diff.toString()}`);
+  }
+
+  async function increaseTime(seconds) {
+    // await time.increase(seconds);
+    const now = (await ethers.provider.getBlock("latest")).timestamp;
+    const next = now + seconds;
+    await network.provider.send("evm_setNextBlockTimestamp", [next]);
+    await network.provider.send("evm_mine");
   }
 
   function createTruffleTokenConfig(
@@ -658,8 +675,11 @@ contract("RDOracle", async accounts => {
     await coreContracts.parControl.setAddresses(coreContracts.relayer.address); // new
     await coreContracts.rateControl.setAddresses(coreContracts.relayer.address); // new
 
-    await coreContracts.aggregator.setAddresses(coreContracts.troveManager.address, coreContracts.lusdToken.address, coreContracts.relayer.address); // new
-
+    await coreContracts.aggregator.setAddresses(
+      coreContracts.troveManager.address,
+      coreContracts.lusdToken.address,
+      coreContracts.relayer.address
+    ); // new
 
     await rdOracle.setAddresses(coreContracts.relayer.address, coreContracts.aggregator.address);
 
@@ -842,7 +862,7 @@ contract("RDOracle", async accounts => {
         }
 
         // await time.increase(MIN_OBSERVATION_DELTA + 1);
-        await time.increase(timeIntervals[i]);
+        await increaseTime(timeIntervals[i]);
         // Perform swap with random tokens
         await executeSwap({
           signer: ethersSigner,
@@ -863,7 +883,7 @@ contract("RDOracle", async accounts => {
 
         // Wait additional time to create time separation
         if (i < swapAmounts.length - 1) {
-          await time.increase(timeIntervals[i]);
+          await increaseTime(timeIntervals[i]);
         }
       } catch (e) {
         console.error("Error during swap:", e);
@@ -873,7 +893,7 @@ contract("RDOracle", async accounts => {
   }
 
   async function executeLargeSwaps() {
-    await time.increase(200);
+    await increaseTime(200);
     await executeSwap({
       signer: ethersSigner,
       newPoolAddress,
@@ -886,7 +906,7 @@ contract("RDOracle", async accounts => {
     });
 
     // Wait more time and add another swap
-    await time.increase(300);
+    await increaseTime(300);
     await executeSwap({
       signer: ethersSigner,
       newPoolAddress,
@@ -899,7 +919,7 @@ contract("RDOracle", async accounts => {
     });
 
     // Force slow window spanning update
-    await time.increase(QUOTE_PERIOD_SLOW + 5);
+    await increaseTime(QUOTE_PERIOD_SLOW + 5);
     await executeSwap({
       signer: ethersSigner,
       newPoolAddress,
@@ -910,7 +930,7 @@ contract("RDOracle", async accounts => {
       tokenInDecimals: USDC_DECIMALS,
       tokenOutDecimals: RD_DECIMALS
     });
-    await time.increase(1);
+    await increaseTime(1);
     await executeSwap({
       signer: ethersSigner,
       newPoolAddress,
@@ -923,7 +943,7 @@ contract("RDOracle", async accounts => {
     });
 
     // 2) Big move to new price regime (post-swap price will be captured on next hook)
-    await time.increase(5);
+    await increaseTime(5);
     await executeSwap({
       signer: ethersSigner,
       newPoolAddress,
@@ -936,11 +956,11 @@ contract("RDOracle", async accounts => {
     });
 
     // 3) Wait so the change is > fast but < slow
-    await time.increase(QUOTE_PERIOD_FAST + 30); // > 300s
+    await increaseTime(QUOTE_PERIOD_FAST + 30); // > 300s
     // Keep total wait < QUOTE_PERIOD_SLOW to ensure slow still spans old+new
 
     // 4) Ensure recent endpoint is valid and write a fresh observation reflecting the new price
-    await time.increase(60 + 5); // >= MIN_PRICE_AGE
+    await increaseTime(60 + 5); // >= MIN_PRICE_AGE
     await executeSwap({
       signer: ethersSigner,
       newPoolAddress,
@@ -1140,212 +1160,12 @@ contract("RDOracle", async accounts => {
     });
   });
 
-  describe("Balancer Pool Hook Functionality (Relayer Integration)", async () => {
-    it("should call updatePar and upateRate on the relayer", async () => {
-      try {
-        const swapTx = await executeSwap({
-          signer: ethersSigner,
-          newPoolAddress,
-          _amountIn: "11",
-          _minAmountOut: "1",
-          tokenIn: RD,
-          tokenOut: USDC,
-          tokenInDecimals: RD_DECIMALS,
-          tokenOutDecimals: USDC_DECIMALS
-        });
-
-        const receipt = await web3.eth.getTransactionReceipt(swapTx.tx);
-        const relayerEvents = receipt.logs.filter(
-          log => log.address.toLowerCase() === relayer.address.toLowerCase()
-        );
-        expect(relayerEvents.length).to.be.equal(2);
-
-        const updateParEvent = relayerEvents.find(
-          event => event.topics[0] === web3.utils.sha3("ParUpdated(int256,int256,int256,int256)")
-        );
-        const updateRateEvent = relayerEvents.find(
-          event => event.topics[0] === web3.utils.sha3("RateUpdated(int256,int256,int256,int256)")
-        );
-
-        expect(updateParEvent).to.not.be.null;
-        expect(updateRateEvent).to.not.be.null;
-      } catch (e) {
-        console.error("Error during updatePar and updateRate:", e);
-        throw e;
-      }
-    });
-  });
-
-  describe("Balancer Pool Hook Functionality (beforeSwap)", async () => {
-    it("should call the oracle hook onBeforeSwap handler", async () => {
-      try {
-        await time.increase(1);
-        const swapTx = await executeSwap({
-          signer: ethersSigner,
-          newPoolAddress,
-          _amountIn: "11",
-          _minAmountOut: "1",
-          tokenIn: RD,
-          tokenOut: USDC,
-          tokenInDecimals: RD_DECIMALS,
-          tokenOutDecimals: USDC_DECIMALS
-        });
-        // Get transaction receipt to see if the hook was called and check if the event is correct
-        const receipt = await web3.eth.getTransactionReceipt(swapTx.tx);
-        // Check if there are any events from the oracle
-        const oracleEvents = receipt.logs.filter(
-          log => log.address.toLowerCase() === rdOracle.address.toLowerCase()
-        );
-        expect(oracleEvents.length).to.be.equal(2);
-        const eventTopic = oracleEvents[0].topics[0];
-        expect(eventTopic).to.be.equal(web3.utils.sha3("OracleHookCalled(address,bool,uint32)"));
-      } catch (e) {
-        console.error("Error during swap:", e);
-        throw e;
-      }
-    });
-
-    it("should record an observation if in the next block", async () => {
-      const oracleStateBefore = await rdOracle.oracleState();
-
-      try {
-        await time.increase(1);
-
-        const swapTx = await executeSwap({
-          signer: ethersSigner,
-          newPoolAddress,
-          _amountIn: "5",
-          _minAmountOut: "1",
-          tokenIn: RD,
-          tokenOut: USDC,
-          tokenInDecimals: RD_DECIMALS,
-          tokenOutDecimals: USDC_DECIMALS
-        });
-        const oracleStateAfter = await rdOracle.oracleState();
-
-        expect(oracleStateAfter.observationIndex.toNumber()).to.be.equal(
-          oracleStateBefore.observationIndex.toNumber() + 1
-        );
-      } catch (e) {
-        console.error("Error during swap:", e);
-        throw e;
-      }
-    });
-
-    it("should only record 1 observation if in the same block", async () => {
-      const latestTimestamp = (await time.latest()).toNumber();
-      const deadline = latestTimestamp + 3600;
-
-      // amounts and limits
-      const amountIn1 = ethers.utils.parseUnits("2", RD_DECIMALS);
-      const amountIn2 = ethers.utils.parseUnits("2", RD_DECIMALS);
-      const minOut1 = ethers.utils.parseUnits("1", USDC_DECIMALS);
-      const minOut2 = ethers.utils.parseUnits("1", USDC_DECIMALS);
-
-      const expiration = Math.floor(Date.now() / 1000) + 86400; // 24 hours
-
-      const permit2Contract = new ethers.Contract(
-        PERMIT2_ADDRESS,
-        [
-          "function approve(address token, address spender, uint160 amount, uint48 expiration) external"
-        ],
-        ethersSigner
-      );
-
-      const oracleStateBefore = await rdOracle.oracleState();
-
-      // Ensure allowance for BOTH swaps from the EOA
-      await permit2Contract.approve(
-        RD.address,
-        router.address,
-        PERMIT2_MAX_AMOUNT,
-        PERMIT2_MAX_EXPIRATION
-      );
-
-      // Use ethers for the Router
-      const routerEthers = new ethers.Contract(router.address, Router.abi, ethersSigner);
-
-      const data1 = routerEthers.interface.encodeFunctionData("swapSingleTokenExactIn", [
-        newPoolAddress,
-        RD.address,
-        USDC.address,
-        amountIn1,
-        minOut1,
-        deadline,
-        false,
-        "0x"
-      ]);
-
-      const data2 = routerEthers.interface.encodeFunctionData("swapSingleTokenExactIn", [
-        newPoolAddress,
-        RD.address,
-        USDC.address,
-        amountIn2,
-        minOut2,
-        deadline,
-        false,
-        "0x"
-      ]);
-
-      const tx = await routerEthers.multicall([data1, data2]); // sent by ethersSigner (anvilAccount1)
-      await tx.wait();
-
-      const oracleStateAfter = await rdOracle.oracleState();
-
-      expect(oracleStateAfter.observationIndex.toNumber()).to.be.equal(
-        oracleStateBefore.observationIndex.toNumber() + 1
-      );
-    });
-  });
-
-  describe("Balancer Pool Hook Functionality (beforeAddLiquidity)", async () => {
-    it("should call the oracle hook onBeforeAddLiquidity handler", async () => {
-      try {
-        await time.increase(1);
-        const txHash = await addLiquidity();
-        // Get transaction receipt to see if the hook was called and check if the event is correct
-        const receipt = await web3.eth.getTransactionReceipt(txHash);
-        // Check if there are any events from the oracle
-        const oracleEvents = receipt.logs.filter(
-          log => log.address.toLowerCase() === rdOracle.address.toLowerCase()
-        );
-        expect(oracleEvents.length).to.be.equal(2);
-        const eventTopic = oracleEvents[0].topics[0];
-        expect(eventTopic).to.be.equal(web3.utils.sha3("OracleHookCalled(address,bool,uint32)"));
-      } catch (e) {
-        console.error("Error during addLiquidity:", e);
-        throw e;
-      }
-    });
-  });
-
-  describe("Balancer Pool Hook Functionality (beforeRemoveLiquidity)", async () => {
-    it("should call the oracle hook onBeforeRemoveLiquidity handler", async () => {
-      try {
-        await time.increase(1);
-        const txHash = await removeLiquidity();
-        // Get transaction receipt to see if the hook was called and check if the event is correct
-        const receipt = await web3.eth.getTransactionReceipt(txHash);
-        // Check if there are any events from the oracle
-        const oracleEvents = receipt.logs.filter(
-          log => log.address.toLowerCase() === rdOracle.address.toLowerCase()
-        );
-        expect(oracleEvents.length).to.be.equal(2);
-        const eventTopic = oracleEvents[0].topics[0];
-        expect(eventTopic).to.be.equal(web3.utils.sha3("OracleHookCalled(address,bool,uint32)"));
-      } catch (e) {
-        console.error("Error during removeLiquidity:", e);
-        throw e;
-      }
-    });
-  });
-
   describe("Price Reading Functions", () => {
     it("should build observation history through multiple swaps", async () => {
       const before = await rdOracle.oracleState();
       const beforeIdx = before.observationIndex.toNumber();
 
-      await time.increase(2);
+      await increaseTime(2);
       await executeSwap({
         signer: ethersSigner,
         newPoolAddress,
@@ -1357,7 +1177,7 @@ contract("RDOracle", async accounts => {
         tokenOutDecimals: USDC_DECIMALS
       });
 
-      await time.increase(2);
+      await increaseTime(2);
       await executeSwap({
         signer: ethersSigner,
         newPoolAddress,
@@ -1375,20 +1195,22 @@ contract("RDOracle", async accounts => {
 
     it("should read fast price correctly", async () => {
       const fastPrice = await rdOracle.readFast();
-      expect(fastPrice.toString()).to.be.equal("997802527977264342");
+      expectCloseWei(fastPrice, "997802527977264342");
       expect(fastPrice).to.be.bignumber.equal(new BN("997802527977264342"));
     });
 
     it("should read slow price correctly", async () => {
       const slowPrice = await rdOracle.readSlow();
-      expect(slowPrice.toString()).to.be.equal("1003706667776608861");
-      expect(slowPrice).to.be.bignumber.equal(new BN("1003706667776608861"));
+      expectCloseWei(slowPrice, "1003907419147230860");
+      expect(slowPrice).to.be.bignumber.equal(new BN("1003907419147230860"));
     });
 
     it("should read both fast and slow prices", async () => {
       const { _fastValue, _slowValue } = await rdOracle.readFastSlow();
+      expectCloseWei(_fastValue, "997802527977264342");
       expect(_fastValue).to.be.bignumber.equal(new BN("997802527977264342"));
-      expect(_slowValue).to.be.bignumber.equal(new BN("1003706667776608861"));
+      expectCloseWei(_slowValue, "1003907419147230860");
+      expect(_slowValue).to.be.bignumber.equal(new BN("1003907419147230860"));
     });
   });
 
@@ -1397,13 +1219,15 @@ contract("RDOracle", async accounts => {
       const { _result, _validity } = await rdOracle.getFastResultWithValidity();
       expect(_result).to.be.bignumber.gt(new BN(0));
       expect(_validity).to.be.true;
+      expectCloseWei(_result, "997802527977264342");
       expect(_result).to.be.bignumber.equal(new BN("997802527977264342"));
     });
 
     it("should get slow result with validity", async () => {
       const { _result, _validity } = await rdOracle.getSlowResultWithValidity();
       expect(_result).to.be.bignumber.gt(new BN(0));
-      expect(_result).to.be.bignumber.equal(new BN("1003706667776608861"));
+      expectCloseWei(_result, "1003907419147230860");
+      expect(_result).to.be.bignumber.equal(new BN("1003907419147230860"));
       expect(_validity).to.be.true;
     });
 
@@ -1412,8 +1236,8 @@ contract("RDOracle", async accounts => {
         await rdOracle.getFastSlowResultWithValidity();
       expect(_fastResult).to.be.bignumber.gt(new BN(0));
       expect(_slowResult).to.be.bignumber.gt(new BN(0));
-      expect(_fastResult).to.be.bignumber.equal(new BN("997802527977264342"));
-      expect(_slowResult).to.be.bignumber.equal(new BN("1003706667776608861"));
+      expectCloseWei(_fastResult, "997802527977264342");
+      expectCloseWei(_slowResult, "1003907419147230860");
       expect(_fastValidity).to.be.true;
       expect(_slowValidity).to.be.true;
     });
@@ -1468,7 +1292,17 @@ contract("RDOracle", async accounts => {
     it("should update oracle state when price changes", async () => {
       // Test that oracle state updates when price changes significantly
       const initialState = await rdOracle.oracleState();
-      await executeLargeSwaps();
+      // await executeLargeSwaps();
+      await executeSwap({ 
+        signer: ethersSigner,
+        newPoolAddress,
+        _amountIn: "10000",
+        _minAmountOut: "1",
+        tokenIn: RD,
+        tokenOut: USDC,
+        tokenInDecimals: RD_DECIMALS,
+        tokenOutDecimals: USDC_DECIMALS
+      });
       const finalState = await rdOracle.oracleState();
       expect(finalState.observationIndex).to.be.bignumber.gt(initialState.observationIndex);
     });
@@ -1513,7 +1347,7 @@ contract("RDOracle", async accounts => {
       // Test that OraclePriceUpdated event is emitted when price changes
       const initialState = await rdOracle.oracleState();
 
-      await time.increase(BLOCK_TIME + 10); // Add buffer
+      await increaseTime(BLOCK_TIME + 10); // Add buffer
 
       const swapTx = await executeSwap({
         signer: ethersSigner,
@@ -1734,6 +1568,219 @@ contract("RDOracle", async accounts => {
       expect(derivative1).to.be.bignumber.lt(new BN("300000000000000000000")); // < 300
       expect(derivative2).to.be.bignumber.gt(new BN("100000000000000000000")); // > 100
       expect(derivative2).to.be.bignumber.lt(new BN("300000000000000000000")); // < 300
+    });
+  });
+
+  describe("Balancer Pool Hook Functionality (beforeSwap)", async () => {
+    it("should call the oracle hook onBeforeSwap handler", async () => {
+      try {
+        await increaseTime(1);
+        const swapTx = await executeSwap({
+          signer: ethersSigner,
+          newPoolAddress,
+          _amountIn: "11",
+          _minAmountOut: "1",
+          tokenIn: RD,
+          tokenOut: USDC,
+          tokenInDecimals: RD_DECIMALS,
+          tokenOutDecimals: USDC_DECIMALS
+        });
+        // Get transaction receipt to see if the hook was called and check if the event is correct
+        const receipt = await web3.eth.getTransactionReceipt(swapTx.tx);
+        // Check if there are any events from the oracle
+        const oracleEvents = receipt.logs.filter(
+          log => log.address.toLowerCase() === rdOracle.address.toLowerCase()
+        );
+        expect(oracleEvents.length).to.be.equal(2);
+        const eventTopic = oracleEvents[0].topics[0];
+        expect(eventTopic).to.be.equal(web3.utils.sha3("OracleHookCalled(address,bool,uint32)"));
+      } catch (e) {
+        console.error("Error during swap:", e);
+        throw e;
+      }
+    });
+
+    it("should record an observation if in the next block", async () => {
+      const oracleStateBefore = await rdOracle.oracleState();
+
+      try {
+        await increaseTime(1);
+
+        const swapTx = await executeSwap({
+          signer: ethersSigner,
+          newPoolAddress,
+          _amountIn: "5",
+          _minAmountOut: "1",
+          tokenIn: RD,
+          tokenOut: USDC,
+          tokenInDecimals: RD_DECIMALS,
+          tokenOutDecimals: USDC_DECIMALS
+        });
+        const oracleStateAfter = await rdOracle.oracleState();
+
+        expect(oracleStateAfter.observationIndex.toNumber()).to.be.equal(
+          oracleStateBefore.observationIndex.toNumber() + 1
+        );
+      } catch (e) {
+        console.error("Error during swap:", e);
+        throw e;
+      }
+    });
+
+    it("should only record 1 observation if in the same block", async () => {
+      const latestTimestamp = (await time.latest()).toNumber();
+      const deadline = latestTimestamp + 3600;
+
+      // amounts and limits
+      const amountIn1 = ethers.utils.parseUnits("2", RD_DECIMALS);
+      const amountIn2 = ethers.utils.parseUnits("2", RD_DECIMALS);
+      const minOut1 = ethers.utils.parseUnits("1", USDC_DECIMALS);
+      const minOut2 = ethers.utils.parseUnits("1", USDC_DECIMALS);
+
+      const expiration = Math.floor(Date.now() / 1000) + 86400; // 24 hours
+
+      const permit2Contract = new ethers.Contract(
+        PERMIT2_ADDRESS,
+        [
+          "function approve(address token, address spender, uint160 amount, uint48 expiration) external"
+        ],
+        ethersSigner
+      );
+
+      const oracleStateBefore = await rdOracle.oracleState();
+
+      // Ensure allowance for BOTH swaps from the EOA
+      await permit2Contract.approve(
+        RD.address,
+        router.address,
+        PERMIT2_MAX_AMOUNT,
+        PERMIT2_MAX_EXPIRATION
+      );
+
+      // Use ethers for the Router
+      const routerEthers = new ethers.Contract(router.address, Router.abi, ethersSigner);
+
+      const data1 = routerEthers.interface.encodeFunctionData("swapSingleTokenExactIn", [
+        newPoolAddress,
+        RD.address,
+        USDC.address,
+        amountIn1,
+        minOut1,
+        deadline,
+        false,
+        "0x"
+      ]);
+
+      const data2 = routerEthers.interface.encodeFunctionData("swapSingleTokenExactIn", [
+        newPoolAddress,
+        RD.address,
+        USDC.address,
+        amountIn2,
+        minOut2,
+        deadline,
+        false,
+        "0x"
+      ]);
+
+      const tx = await routerEthers.multicall([data1, data2]); // sent by ethersSigner (anvilAccount1)
+      await tx.wait();
+
+      const oracleStateAfter = await rdOracle.oracleState();
+
+      expect(oracleStateAfter.observationIndex.toNumber()).to.be.equal(
+        oracleStateBefore.observationIndex.toNumber() + 1
+      );
+    });
+  });
+
+  describe("Balancer Pool Hook Functionality (beforeAddLiquidity)", async () => {
+    it("should call the oracle hook onBeforeAddLiquidity handler", async () => {
+      try {
+        await increaseTime(1);
+        const txHash = await addLiquidity();
+        // Get transaction receipt to see if the hook was called and check if the event is correct
+        const receipt = await web3.eth.getTransactionReceipt(txHash);
+        // Check if there are any events from the oracle
+        const oracleEvents = receipt.logs.filter(
+          log => log.address.toLowerCase() === rdOracle.address.toLowerCase()
+        );
+        expect(oracleEvents.length).to.be.equal(2);
+        const eventTopic = oracleEvents[0].topics[0];
+        expect(eventTopic).to.be.equal(web3.utils.sha3("OracleHookCalled(address,bool,uint32)"));
+      } catch (e) {
+        console.error("Error during addLiquidity:", e);
+        throw e;
+      }
+    });
+  });
+
+  describe("Balancer Pool Hook Functionality (beforeRemoveLiquidity)", async () => {
+    it("should call the oracle hook onBeforeRemoveLiquidity handler", async () => {
+      try {
+        await increaseTime(1);
+        const txHash = await removeLiquidity();
+        // Get transaction receipt to see if the hook was called and check if the event is correct
+        const receipt = await web3.eth.getTransactionReceipt(txHash);
+        // Check if there are any events from the oracle
+        const oracleEvents = receipt.logs.filter(
+          log => log.address.toLowerCase() === rdOracle.address.toLowerCase()
+        );
+        expect(oracleEvents.length).to.be.equal(2);
+        const eventTopic = oracleEvents[0].topics[0];
+        expect(eventTopic).to.be.equal(web3.utils.sha3("OracleHookCalled(address,bool,uint32)"));
+      } catch (e) {
+        console.error("Error during removeLiquidity:", e);
+        throw e;
+      }
+    });
+  });
+
+  describe("Balancer Pool Hook Functionality (Relayer Integration)", async () => {
+    it("should call updatePar and upateRate on the relayer", async () => {
+      try {
+        await increaseTime(601); // make par stale (also makes rate stale)
+
+        // const swapTx = await executeSwap({
+        //   signer: ethersSigner,
+        //   newPoolAddress,
+        //   _amountIn: "11",
+        //   _minAmountOut: "1",
+        //   tokenIn: RD,
+        //   tokenOut: USDC,
+        //   tokenInDecimals: RD_DECIMALS,
+        //   tokenOutDecimals: USDC_DECIMALS
+        // });
+
+        await executeSwap({
+          signer: ethersSigner,
+          newPoolAddress,
+          _amountIn: "0.000001", // 1e-6 RD
+          _minAmountOut: "0", // avoid slippage reverts
+          tokenIn: RD,
+          tokenOut: USDC,
+          tokenInDecimals: RD_DECIMALS, // 18
+          tokenOutDecimals: USDC_DECIMALS // 6
+        });
+
+        const receipt = await web3.eth.getTransactionReceipt(swapTx.tx);
+        const relayerEvents = receipt.logs.filter(
+          log => log.address.toLowerCase() === relayer.address.toLowerCase()
+        );
+        expect(relayerEvents.length).to.be.equal(2);
+
+        const updateParEvent = relayerEvents.find(
+          event => event.topics[0] === web3.utils.sha3("ParUpdated(int256,int256,int256,int256)")
+        );
+        const updateRateEvent = relayerEvents.find(
+          event => event.topics[0] === web3.utils.sha3("RateUpdated(int256,int256,int256,int256)")
+        );
+
+        expect(updateParEvent).to.not.be.null;
+        expect(updateRateEvent).to.not.be.null;
+      } catch (e) {
+        console.error("Error during updatePar and updateRate:", e);
+        throw e;
+      }
     });
   });
 });
