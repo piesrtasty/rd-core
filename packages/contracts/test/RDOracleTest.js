@@ -1817,9 +1817,116 @@ contract("RDOracle", async accounts => {
         );
 
         expect(dripEvent).to.not.be.null;
-
       } catch (e) {
         console.error("Error during updatePar and updateRate:", e);
+        throw e;
+      }
+    });
+  });
+
+  describe("Pending local reward functionality", async () => {
+    it("should update the pending local reward", async () => {
+      try {
+        await increaseTime(601); // make par stale (also makes rate stale)
+
+        const pendingLocalRewardBefore = await rdOracle.pendingLocalReward();
+
+        //  Increase time by 3  hours
+        await increaseTime(10800);
+
+        await executeSwap({
+          signer: ethersSigner,
+          newPoolAddress,
+          _amountIn: "0.000001", // 1e-6 RD
+          _minAmountOut: "0", // avoid slippage reverts
+          tokenIn: RD,
+          tokenOut: USDC,
+          tokenInDecimals: RD_DECIMALS, // 18
+          tokenOutDecimals: USDC_DECIMALS // 6
+        });
+
+        const pendingLocalRewardAfter = await rdOracle.pendingLocalReward();
+
+        expect(pendingLocalRewardAfter).to.be.bignumber.gt(pendingLocalRewardBefore);
+      } catch (e) {
+        console.error("Error during updatePar and updateRate:", e);
+        throw e;
+      }
+    });
+
+    it("should claim the pending local reward when reward = balance", async () => {
+      try {
+        const pendingLocalRewardBefore = await rdOracle.pendingLocalReward();
+        await mockRD.mint(rdOracle.address, pendingLocalRewardBefore);
+        const balanceBeforeClaim = await mockRD.balanceOf(rdOracle.address);
+
+        expect(balanceBeforeClaim).to.be.bignumber.eq(pendingLocalRewardBefore);
+
+        await rdOracle.claimLocalReward();
+
+        const balanceAfterClaim = await mockRD.balanceOf(rdOracle.address);
+        expect(balanceAfterClaim).to.be.bignumber.eq(new BN(0));
+
+        const pendingLocalRewardAfterClaim = await rdOracle.pendingLocalReward();
+        expect(pendingLocalRewardAfterClaim).to.be.bignumber.eq(new BN(0));
+      } catch (e) {
+        console.error("Error during claimLocalReward when reward = balance:", e);
+        throw e;
+      }
+    });
+
+    it("should claim the pending local reward when reward > balance", async () => {
+      try {
+        const pendingLocalRewardBefore = await rdOracle.pendingLocalReward();
+
+        const hundred = new BN(100);
+
+        // Mint less than owed by 100 only if owed >= 100; else mint 0
+        const balanceToMint = pendingLocalRewardBefore.gt(hundred)
+          ? pendingLocalRewardBefore.sub(hundred)
+          : new BN(0);
+
+        await mockRD.mint(rdOracle.address, balanceToMint);
+
+        const balanceBeforeClaim = await mockRD.balanceOf(rdOracle.address);
+        expect(balanceBeforeClaim).to.be.bignumber.eq(balanceToMint);
+
+        // Act
+        await rdOracle.claimLocalReward();
+
+        // Balance should be drained
+        const balanceAfterClaim = await mockRD.balanceOf(rdOracle.address);
+        expect(balanceAfterClaim).to.be.bignumber.eq(new BN(0));
+
+        // Pending should be the remainder (owed - paid)
+        const pendingLocalRewardAfterClaim = await rdOracle.pendingLocalReward();
+        const expectedRemainder = pendingLocalRewardBefore.sub(balanceToMint);
+        expect(pendingLocalRewardAfterClaim).to.be.bignumber.eq(expectedRemainder);
+      } catch (e) {
+        console.error("Error during claimLocalReward when reward > balance:", e);
+        throw e;
+      }
+    });
+
+    it("should claim the pending local reward when reward < balance", async () => {
+      try {
+        const pendingLocalRewardBefore = await rdOracle.pendingLocalReward();
+        const balanceToMint = pendingLocalRewardBefore.add(new BN(100));
+        await mockRD.mint(rdOracle.address, balanceToMint);
+
+        // Act
+        await rdOracle.claimLocalReward();
+
+        // After
+        const balanceAfterClaim = await mockRD.balanceOf(rdOracle.address);
+        // Expect the extra 100 to remain
+        expect(balanceAfterClaim).to.be.bignumber.eq(new BN(100));
+
+        // Pending should be zero (owed fully paid)
+        const pendingLocalRewardAfterClaim = await rdOracle.pendingLocalReward();
+        expect(pendingLocalRewardAfterClaim).to.be.bignumber.eq(new BN(0));
+      } catch (e) {
+        console.error("Error during claimLocalReward when reward < balance:", e);
         throw e;
       }
     });

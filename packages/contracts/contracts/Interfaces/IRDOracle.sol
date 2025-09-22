@@ -43,6 +43,13 @@ interface IRDOracle {
      */
     event AggregatorAddressChanged(address _aggregatorAddress);
 
+    /**
+     * @notice Emitted when the local reward is claimed
+     * @param _sender The sender of the claim
+     * @param _amount The amount of the claim
+     */
+    event OracleRewardClaimed(address _sender, uint256 _amount);
+
     // --- Errors ---
 
     /**

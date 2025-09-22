@@ -365,6 +365,8 @@ contract RDOracle is IRDOracle, BaseHooks, VaultGuard, Ownable, CheckContract {
         pendingLocalReward = owed - pay; // keep the remaining owed amount
         bool ok = IERC20(rdToken).transfer(msg.sender, pay);
         if (!ok) revert Oracle_ClaimRewardTransferFailed();
+
+        emit OracleRewardClaimed(msg.sender, pay);
     }
 
     // --- Dependency setter ---
