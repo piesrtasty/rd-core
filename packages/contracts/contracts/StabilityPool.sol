@@ -157,10 +157,16 @@ contract StabilityPool is LiquityBase, Ownable, CheckContract, IStabilityPool {
 
     IERC20 public collateralToken;
 
+    address public feeRouter;
+
     uint256 internal CT;  // deposited Collateral Token tracker
 
-    // Tracker for LUSD held in the pool. Changes when users deposit/withdraw, and when Trove debt is offset.
+    // Tracker for LUSD held in the pool. Changes when fees are disbursed to the pool, users deposit/withdraw, and when Trove debt is offset.
     uint256 internal totalLUSDDeposits;
+
+    // Fees that have been credited in totalLUSDDeposits, but not minted yet
+    //uint256 internal pendingLUSDDeposits;
+    uint256 public override pendingLUSDDeposits;
 
    // --- Data structures ---
 
@@ -278,7 +284,8 @@ contract StabilityPool is LiquityBase, Ownable, CheckContract, IStabilityPool {
         address _sortedShieldedTrovesAddress,
         address _priceFeedAddress,
         address _communityIssuanceAddress,
-        address _collateralToken
+        address _collateralToken,
+        address _feeRouterAddress
     )
         external
         override
@@ -295,6 +302,7 @@ contract StabilityPool is LiquityBase, Ownable, CheckContract, IStabilityPool {
         checkContract(_priceFeedAddress);
         checkContract(_communityIssuanceAddress);
         checkContract(_collateralToken);
+        checkContract(_feeRouterAddress);
 
         borrowerOperations = IBorrowerOperations(_borrowerOperationsAddress);
         liquidations = _liquidationsAddress;
@@ -307,12 +315,13 @@ contract StabilityPool is LiquityBase, Ownable, CheckContract, IStabilityPool {
         priceFeed = IPriceFeed(_priceFeedAddress);
         communityIssuance = ICommunityIssuance(_communityIssuanceAddress);
         collateralToken = IERC20(_collateralToken);
+        feeRouter = _feeRouterAddress;
 
         // give approval to active pool to spend collateral
         collateralToken.approve(address(activePool), type(uint256).max);
 
         emit BorrowerOperationsAddressChanged(_borrowerOperationsAddress);
-        emit LiquidationsAddressChanged(_borrowerOperationsAddress);
+        emit LiquidationsAddressChanged(_liquidationsAddress);
         emit TroveManagerAddressChanged(_troveManagerAddress);
         emit ActivePoolAddressChanged(_activePoolAddress);
         emit ActiveShieldedPoolAddressChanged(_activeShieldedPoolAddress);
@@ -321,6 +330,7 @@ contract StabilityPool is LiquityBase, Ownable, CheckContract, IStabilityPool {
         emit SortedShieldedTrovesAddressChanged(_sortedShieldedTrovesAddress);
         emit PriceFeedAddressChanged(_priceFeedAddress);
         emit CommunityIssuanceAddressChanged(_communityIssuanceAddress);
+        emit FeeRouterAddressChanged(_feeRouterAddress);
 
         _renounceOwnership();
     }
@@ -350,9 +360,10 @@ contract StabilityPool is LiquityBase, Ownable, CheckContract, IStabilityPool {
         _requireFrontEndNotRegistered(msg.sender);
         _requireNonZeroAmount(_amount);
 
-        uint initialDeposit = deposits[msg.sender].initialValue;
+        troveManager.drip();
+        _mintPendingDeposits();
 
-        // TODO should a drip() be here? This will break many tests
+        uint initialDeposit = deposits[msg.sender].initialValue;
 
         ICommunityIssuance communityIssuanceCached = communityIssuance;
 
@@ -384,6 +395,10 @@ contract StabilityPool is LiquityBase, Ownable, CheckContract, IStabilityPool {
         _sendCollateralGainToDepositor(depositorCollateralGain);
      }
 
+    function withdrawAllFromSP() external {
+        withdrawFromSP(type(uint256).max);
+    }
+
     /*  withdrawFromSP():
     *
     * - Triggers a LQTY issuance, based on time passed since the last issuance. The LQTY issuance is shared between *all* depositors and front ends
@@ -394,10 +409,13 @@ contract StabilityPool is LiquityBase, Ownable, CheckContract, IStabilityPool {
     *
     * If _amount > userDeposit, the user withdraws all of their compounded deposit.
     */
-    function withdrawFromSP(uint _amount) external override {
+    function withdrawFromSP(uint _amount) public override {
         if (_amount !=0) {_requireNoUnderCollateralizedTroves();}
         uint initialDeposit = deposits[msg.sender].initialValue;
         _requireUserHasDeposit(initialDeposit);
+
+        troveManager.drip();
+        _mintPendingDeposits();
 
         ICommunityIssuance communityIssuanceCached = communityIssuance;
 
@@ -406,7 +424,12 @@ contract StabilityPool is LiquityBase, Ownable, CheckContract, IStabilityPool {
         uint depositorCollateralGain = getDepositorCollateralGain(msg.sender);
 
         uint compoundedLUSDDeposit = getCompoundedLUSDDeposit(msg.sender);
-        uint LUSDtoWithdraw = LiquityMath._min(_amount, compoundedLUSDDeposit);
+
+        uint total = totalLUSDDeposits;
+        uint available = total > MIN_LUSD_IN_SP ? total.sub(MIN_LUSD_IN_SP) : 0;
+
+        uint LUSDtoWithdraw = LiquityMath._min(LiquityMath._min(_amount, available), compoundedLUSDDeposit);
+
         int LUSDLoss = LiquityMath.safeSignedSub(initialDeposit, compoundedLUSDDeposit); // Needed only for event log
 
         // First pay out any LQTY gains
@@ -415,6 +438,10 @@ contract StabilityPool is LiquityBase, Ownable, CheckContract, IStabilityPool {
         
         // Update front end stake
         uint compoundedFrontEndStake = getCompoundedFrontEndStake(frontEnd);
+
+        // this was needed after adding drip to this function and emptying a frontend's stake
+        if (LUSDtoWithdraw > compoundedFrontEndStake) LUSDtoWithdraw= compoundedFrontEndStake;
+
         uint newFrontEndStake = compoundedFrontEndStake.sub(LUSDtoWithdraw);
         _updateFrontEndStakeAndSnapshots(frontEnd, newFrontEndStake);
         emit FrontEndStakeChanged(frontEnd, newFrontEndStake, msg.sender);
@@ -445,6 +472,8 @@ contract StabilityPool is LiquityBase, Ownable, CheckContract, IStabilityPool {
         _requireUserHasTrove(msg.sender);
         _requireUserHasCollateralGain(msg.sender);
 
+        troveManager.drip();
+        _mintPendingDeposits();
         ICommunityIssuance communityIssuanceCached = communityIssuance;
 
         _triggerLQTYIssuance(communityIssuanceCached);
@@ -532,12 +561,11 @@ contract StabilityPool is LiquityBase, Ownable, CheckContract, IStabilityPool {
         // - If it has 0 < x < 1e18 total deposits, we leave x in it.
         uint256 lusdToLeaveInSP = LiquityMath._min(MIN_LUSD_IN_SP, totalLUSD);
         uint LUSDInSPForOffsets = totalLUSD - lusdToLeaveInSP; // safe, for the line above
+
         // Let’s avoid underflow in case of a tiny offset
-        /*
         if (LUSDInSPForOffsets.mul(DECIMAL_PRECISION) <= lastLUSDLossError_Offset) {
             LUSDInSPForOffsets = 0;
         }
-        */
 
         return LUSDInSPForOffsets;
     }
@@ -550,6 +578,10 @@ contract StabilityPool is LiquityBase, Ownable, CheckContract, IStabilityPool {
     function offset(uint _baseDebtToOffset, uint _baseNDebtToOffset, uint _baseCollToAdd,
                     uint _shieldedDebtToOffset, uint _shieldedNDebtToOffset, uint _shieldedCollToAdd) external override {
         _requireCallerIsLiq();
+
+        // Dont need drip() here since it's called upstream in liquidations
+        _mintPendingDeposits();
+
         uint totalLUSD = totalLUSDDeposits; // cached to save an SLOAD
         if (totalLUSD == 0 || (_baseDebtToOffset == 0 && _shieldedDebtToOffset == 0)) { return; }
 
@@ -905,6 +937,7 @@ contract StabilityPool is LiquityBase, Ownable, CheckContract, IStabilityPool {
         _requireUserHasNoDeposit(msg.sender);
         _requireValidKickbackRate(_kickbackRate);
 
+        troveManager.drip();
         frontEnds[msg.sender].kickbackRate = _kickbackRate;
         frontEnds[msg.sender].registered = true;
 
@@ -988,8 +1021,8 @@ contract StabilityPool is LiquityBase, Ownable, CheckContract, IStabilityPool {
                 "StabilityPool: Caller is not ActivePool");
     }
 
-    function _requireCallerIsTroveManager() internal view {
-        require(msg.sender == address(troveManager), "StabilityPool: Caller is not TroveManager");
+    function _requireCallerIsFeeRouter() internal view {
+        require(msg.sender == address(feeRouter), "StabilityPool: Caller is not FeeRouter");
     }
 
     function _requireCallerIsLiq() internal view {
@@ -1044,8 +1077,15 @@ contract StabilityPool is LiquityBase, Ownable, CheckContract, IStabilityPool {
         emit StabilityPoolCollateralBalanceUpdated(CT);
     }
 
-    function distributeToSP(uint256 lusdGain) external override {
-        _requireCallerIsTroveManager();
+    function _mintPendingDeposits() internal {
+        if (pendingLUSDDeposits > 0) {
+            lusdToken.mint(address(this), pendingLUSDDeposits);
+            pendingLUSDDeposits = 0;
+        }
+    }
+
+    function distributeFees(uint256 lusdGain) external override {
+        _requireCallerIsFeeRouter();
         if (lusdGain == 0) return;
 
         require(totalLUSDDeposits > 0, "StabilityPool: can't distribute when totalLUSDDeposits == 0");
@@ -1056,11 +1096,14 @@ contract StabilityPool is LiquityBase, Ownable, CheckContract, IStabilityPool {
         lastLUSDGainError = numerator - lusdGainPerUnitStaked * totalLUSDDeposits;
 
         totalLUSDDeposits += lusdGain;
+        // virtual deposits that haven't been minted yet
+        pendingLUSDDeposits += lusdGain;
 
         uint256 currentP = P;
         uint256 newProductFactor = DECIMAL_PRECISION + lusdGainPerUnitStaked;
 
         uint256 newP = currentP.mul(newProductFactor).div(DECIMAL_PRECISION);
+
         require(newP >= currentP, "P overflow");
 
         emit DistributeToSP(P, newP, lusdGain, totalLUSDDeposits);

@@ -122,7 +122,9 @@ interface ITroveManager is ILiquityBase {
         uint pendingLUSDDebtReward, 
         uint pendingCollateralReward
     );
-    
+
+    function getEntireSystemDebt() external view returns (uint);
+
     function drip() external;
 
     function aggDrip(uint256 _interestRate) external;

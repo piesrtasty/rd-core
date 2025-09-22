@@ -60,7 +60,7 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
     // per troveManager debt target,  % of total debt
     mapping (address => uint256) public debtTarget;
 
-    address[23] troveManagers;
+    address[1] public troveManagers;
 
     // --- Events ---
     event BaseRateUpdated(uint _baseRate);
@@ -86,6 +86,8 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
         troveManager = ITroveManager(_troveManagerAddress);
         lusdToken = ILUSDToken(_lusdTokenAddress);
         relayer = IRelayer(_relayerAddress);
+
+        troveManagers[0] = address(troveManager);
 
         emit TroveManagerAddressChanged(_troveManagerAddress);
         emit LUSDTokenAddressChanged(_lusdTokenAddress);
@@ -125,21 +127,21 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
 
     function drip() external override {
         uint256 _interestRate = relayer.getRate();
-        for (uint256 _i = 0; _i < troveManagers.length; _i++) {
-            address _troveManager = troveManagers[_i];
-            if (_troveManager == address(0)) continue;
+        // for (uint256 _i = 0; _i < troveManagers.length; _i++) {
+        //     address _troveManager = troveManagers[_i];
+        //     if (_troveManager == address(0)) continue;
 
-            bool _dripIsStale;
-            try ITroveManager(_troveManager).dripIsStale() returns (bool _isStale) {
-                _dripIsStale = _isStale;
-            } catch {
-                continue; // swallow FailedInnerCall on non-conforming targets
-            }
+        //     bool _dripIsStale;
+        //     try ITroveManager(_troveManager).dripIsStale() returns (bool _isStale) {
+        //         _dripIsStale = _isStale;
+        //     } catch {
+        //         continue; // swallow FailedInnerCall on non-conforming targets
+        //     }
 
-            if (_dripIsStale) {
-                ITroveManager(_troveManager).aggDrip(_interestRate);
-            }
-        }
+        //     if (_dripIsStale) {
+        //         ITroveManager(_troveManager).aggDrip(_interestRate);
+        //     }
+        // }
         emit AggregatorDrip(block.timestamp);
     }
 
@@ -242,11 +244,23 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
         return (_measured.sub(_target)).mul(DECIMAL_PRECISION).div(_target);
     }
 
+    function troveManagerLength() external view returns (uint) {
+        return troveManagers.length;
+    }
+
     // --- 'require' wrapper functions ---
 
     function _requireCallerIsTroveManager() internal view {
         //require(msg.sender == troveManagerAddress, "Aggregator: Caller is not TroveManager contract");
         require(msg.sender == address(troveManager), "Aggregator: Caller is not TroveManager contract");
+    }
+
+    function getEntireSystemDebt() external view returns (uint totalDebt) {
+        uint len = troveManagers.length;
+        for (uint i = 0; i < len; i++) {
+            totalDebt += ITroveManager(troveManagers[i]).getEntireSystemDebt();
+        }
+
     }
 
 }

@@ -8,6 +8,7 @@ const getDifference = th.getDifference
 const mv = testHelpers.MoneyValues
 
 const TroveManagerTester = artifacts.require("TroveManagerTester")
+const TroveManagerLib = artifacts.require("TroveManagerLib")
 const LiquidationsTester = artifacts.require("LiquidationsTester")
 const LUSDToken = artifacts.require("LUSDToken")
 
@@ -38,7 +39,12 @@ contract('TroveManager - Redistribution reward calculations', async accounts => 
   const getOpenTroveLUSDAmount = async (totalDebt) => th.getOpenTroveLUSDAmount(contracts, totalDebt)
   const getNetBorrowingAmount = async (debtWithFee) => th.getNetBorrowingAmount(contracts, debtWithFee)
   const openShieldedTrove = async (params) => th.openShieldedTrove(contracts, params)
-
+  let lib;
+  before(async () => {
+    lib = await TroveManagerLib.new();
+    await TroveManagerTester.link(lib);
+  });
+  
   beforeEach(async () => {
     contracts = await deploymentHelper.deployLiquityCore()
     contracts.liquidations = await LiquidationsTester.new()
@@ -47,7 +53,8 @@ contract('TroveManager - Redistribution reward calculations', async accounts => 
       contracts.troveManager.address,
       contracts.liquidations.address,
       contracts.stabilityPool.address,
-      contracts.borrowerOperations.address
+      contracts.borrowerOperations.address,
+      contracts.globalFeeRouter.address
     )
     const LQTYContracts = await deploymentHelper.deployLQTYContracts(bountyAddress, lpRewardsAddress, multisig)
 
