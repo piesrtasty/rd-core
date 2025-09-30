@@ -30,7 +30,13 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
 
     uint constant public SECONDS_IN_ONE_MINUTE = 60;
 
+
+
     uint32 constant public ORACLE_DRIP_INTERVAL = 60;
+
+    uint256 constant public DRIP_INTERVAL = 1 hours;
+    uint256 constant public DRIP_INTERVAL_2 = DRIP_INTERVAL * 2;
+    uint256 constant public DRIP_INTERVAL_3 = DRIP_INTERVAL * 12;
 
     /*
      * Half-life of 12h. 12h = 720 min
@@ -117,16 +123,15 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
 
     function shouldOracleDrip() external  override returns (bool, uint256) {
         uint32 _now = uint32(block.timestamp);
-        bool _shouldDrip = false;
-        if (_now - lastOracleDripTime >= ORACLE_DRIP_INTERVAL) {
-            _shouldDrip = true;
-            lastOracleDripTime = _now;
+        if (_now - lastOracleDripTime < DRIP_INTERVAL)  {
+            return (false, 0);
         }
-        return (_shouldDrip, getOracleDripReward());
+       return (true, getOracleDripReward());
     }
 
     function drip() external override {
-        uint256 _interestRate = relayer.getRate();
+        // update lastOracleDripTime when finishing implementation here
+        // uint256 _interestRate = relayer.getRate();
         // for (uint256 _i = 0; _i < troveManagers.length; _i++) {
         //     address _troveManager = troveManagers[_i];
         //     if (_troveManager == address(0)) continue;
@@ -142,7 +147,7 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
         //         ITroveManager(_troveManager).aggDrip(_interestRate);
         //     }
         // }
-        emit AggregatorDrip(block.timestamp);
+        // emit AggregatorDrip(block.timestamp);
     }
 
     // --- Redemption fee functions ---
