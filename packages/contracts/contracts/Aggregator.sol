@@ -121,7 +121,7 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
         }
     }
 
-    function shouldOracleDrip() external  override returns (bool, uint256) {
+    function shouldOracleDrip() external view override returns (bool, uint256) {
         uint32 _now = uint32(block.timestamp);
         if (_now - lastOracleDripTime < DRIP_INTERVAL)  {
             return (false, 0);
