@@ -198,13 +198,6 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
         return _calcRedemptionRate(_calcDecayedBaseRate());
     }
 
-    function _calcRedemptionRate(uint _baseRate) internal pure returns (uint) {
-        return LiquityMath._min(
-            REDEMPTION_FEE_FLOOR.add(_baseRate),
-            DECIMAL_PRECISION // cap at a maximum of 100%
-        );
-    }
-
     function getRedemptionFee(uint _ETHDrawn) public view override returns (uint) {
         return calcRedemptionFee(getRedemptionRate(), _ETHDrawn);
     }
@@ -220,8 +213,14 @@ contract Aggregator is LiquityBase, Ownable, CheckContract, IAggregator {
         return redemptionFee;
     }
 
-
     // --- Internal fee functions ---
+
+    function _calcRedemptionRate(uint _baseRate) internal pure returns (uint) {
+        return LiquityMath._min(
+            REDEMPTION_FEE_FLOOR.add(_baseRate),
+            DECIMAL_PRECISION // cap at a maximum of 100%
+        );
+    }
 
     // Update the last fee operation time only if time passed >= decay interval. This prevents base rate griefing.
     function _updateLastFeeOpTime() internal {

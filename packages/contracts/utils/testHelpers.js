@@ -26,7 +26,7 @@ const MoneyValues = {
   _ICR100: web3.utils.toBN('1000000000000000000'),
   _CCR: web3.utils.toBN('1500000000000000000'),
 }
-
+const MAX_DELTA_PER_HOUR = web3.utils.toBN("1000000000000000"); // 1e15
 const TimeValues = {
   SECONDS_IN_ONE_MINUTE:  60,
   SECONDS_IN_ONE_HOUR:    60 * 60,
@@ -324,6 +324,136 @@ class TestHelper {
   static async getTCR(contracts) {
     const price = await contracts.priceFeedTestnet.getPrice()
     return contracts.troveManager.getTCR(price)
+  }
+
+  static calculateParTarget(price, coll, debt, targetICR) {
+    // par = coll * price * 1e18 / (debt * targetICR)
+    return coll.mul(price).mul(MoneyValues._1e18BN).div(debt.mul(targetICR));
+  }
+  
+static computeShutdownRedemptionForTrove(totalLUSD, troves, par, price, discount) {
+  let remaining = this.toBN(totalLUSD)
+  let totalCollateral = this.toBN(0);
+  let totalLUSDConsumed = this.toBN(0);
+  const DEC = MoneyValues._1e18BN;
+
+  for (const trove of troves) {
+    const coll = trove[1]
+    const actualDebt = trove[0]
+    if (remaining == this.toBN("0")) break;
+    if (coll == this.toBN("0") || actualDebt == this.toBN("0")) continue;
+
+    // LUSD lot for this trove (cap by debt)
+    let lusdLot = remaining.gt(this.toBN(actualDebt)) ? this.toBN(actualDebt) : remaining;
+
+    // collateralLot = floor(lusdLot * par * 1e18 / ((1e18 - discount) * price))
+    const numer = lusdLot.mul(par).mul(DEC);
+    const denom = DEC.sub(discount).mul(price);
+    let collateralLot = numer.div(denom);
+
+    // Cap by available collateral, recompute lusdLot if capped
+    if (collateralLot.gt(this.toBN(coll))) {
+      collateralLot = coll;
+      const numer2 = collateralLot.mul(DEC.sub(discount)).mul(price);
+      const denom2 = par.mul(DEC);
+      lusdLot = numer2.div(denom2);
+    }
+
+    if (collateralLot == this.toBN("0") || lusdLot == this.toBN("0")) continue;
+
+    totalCollateral = totalCollateral.add(collateralLot);
+    totalLUSDConsumed = totalLUSDConsumed.add(lusdLot);
+    remaining = remaining.sub(lusdLot);
+  }
+
+  return { totalCollateral, totalLUSDConsumed };
+}
+
+  // for use during shutdown since troves cannot be modified, lowers collateral price to hit target ICR with par
+  // does it over time so as to not exceed the max delta per hour
+  static async driveICRToTargetWithPar(contracts, borrower, targetICR) {
+    const { priceFeedTestnet: priceFeed, relayer, marketOracleTestnet: oracle, troveManager } = contracts;
+    const res = await troveManager.getEntireDebtAndColl(borrower);
+    // res[0]=debtBase, res[1]=collBase, res[2]=debtPending, res[3]=collPending
+    const collEff = res[1].add(res[3]);                 // include pending collateral
+    const debtActual = await troveManager.getTroveActualDebt(borrower); // applies rate
+    
+    if (collEff.isZero() || debtActual.isZero()) {
+      throw new Error("zero coll/debt for borrower");
+    }
+    
+    // par* = collEff * price / (debtActual * targetICR)
+    const price = await contracts.priceFeedTestnet.getPrice();
+  
+    // par needed for exact target ICR: par* = coll*price*1e18/(debt*targetICR)
+    let parTarget = collEff.mul(price).mul(MoneyValues._1e18BN).div(debtActual.mul(targetICR));
+    let priceTarget = price;
+    // clamp and recompute price to hit target if needed
+    const PAR_MIN = this.toBN('850000000000000000');   // 0.85e18
+    const PAR_MAX = this.toBN('1250000000000000000');  // 1.25e18
+    const ONE_HOUR = this.toBN(TimeValues.SECONDS_IN_ONE_HOUR.toString());
+
+    // If par* is out of controller bounds, clamp and solve price (18dp) to still hit target
+    if (parTarget.lt(PAR_MIN) || parTarget.gt(PAR_MAX)) {
+      parTarget = parTarget.lt(PAR_MIN) ? PAR_MIN : PAR_MAX;
+      // price* = targetICR * debtActual * parTarget / collEff / 1e18
+      priceTarget = targetICR.mul(debtActual).mul(parTarget).div(collEff).div(MoneyValues._1e18BN);
+    }
+  
+    // Set oracle to feasible price target (int256)
+    await oracle.setPrice(priceTarget);
+  
+    // Initialize controller if needed
+    await relayer.updatePar();
+  
+    let par = await relayer.par();
+    let steps = 0;
+    while (par.sub(parTarget).gt(MAX_DELTA_PER_HOUR) && steps < 256) {
+      const delta = parTarget.sub(par); // desired change this step
+      const dirUp = delta.gt(this.toBN(0));  // need to increase par?
+      const stepSize = MAX_DELTA_PER_HOUR; // 1e-3 per hour
+    
+      // Choose directional nudge
+      const nudge = dirUp ? this.toBN(this.dec(95,16)) : this.toBN(this.dec(105,16)); // 0.95 or 1.05
+      await oracle.setPrice(nudge);
+    
+      // Compute hours to move: ceil(|delta|/stepSize), but cap to 1 for steady progress
+      const absDelta = delta;
+      const hours = absDelta.lte(stepSize) ? this.toBN(1) : absDelta.add(stepSize.sub(this.toBN(1))).div(stepSize);
+
+      // Only fast-forward a bounded number of hours per iteration (prevents huge jumps)
+      const boundedHours = hours.gt(this.toBN(6)) ? this.toBN(6) : hours; // at most 6 hours per iter
+      await this.fastForwardTime(boundedHours.mul(ONE_HOUR).toString(), web3.currentProvider);
+    
+      await relayer.updatePar();
+      par = await relayer.par();
+      steps++;
+    }
+    
+    // Final correction within 1 step
+    if (!par.eq(parTarget)) {
+      const delta = parTarget.sub(par);
+      const dirUp = delta.gt(this.toBN(0));
+      await oracle.setPrice(dirUp ? this.toBN(this.dec(95,16)) : this.toBN(this.dec(105,16)));
+      // exact needed hours: ceil(|delta|/stepSize)
+      const hours = delta.abs().add(MAX_DELTA_PER_HOUR.sub(this.toBN(1))).div(MAX_DELTA_PER_HOUR);
+      if (hours.gt(this.toBN(0))) {
+        await this.fastForwardTime(hours.mul(ONE_HOUR).toString(), web3.currentProvider);
+        await relayer.updatePar();
+        par = await relayer.par();
+      }
+    }
+    
+    // Final snap: recompute a price that hits targetICR with the achieved par, rounding up
+    let priceFinal = targetICR.mul(debtActual).mul(par).div(collEff).div(MoneyValues._1e18BN);
+    // ensure ICR >= targetICR after integer division
+    const icrCheck = collEff.mul(priceFinal).mul(MoneyValues._1e18BN).div(debtActual.mul(par));
+    if (icrCheck.lt(targetICR)) {
+      priceFinal = priceFinal.add(this.toBN('1'));
+    }
+    // set oracle so subsequent logic sees consistent price
+    await priceFeed.setPrice(priceFinal);
+    return { par, steps, priceUsed: priceFinal };
   }
 
   // --- Gas compensation calculation functions ---
@@ -721,12 +851,12 @@ class TestHelper {
     return [event.args[1], event.args[2]]
   }
 
-  static async getBorrowerOpsListHint(contracts, newColl, newDebt) {
+  static async getBorrowerOpsListHint(contracts, newColl, newDebt, shielded = false) {
     const newNICR = await contracts.hintHelpers.computeNominalCR(newColl, newDebt)
     const {
       hintAddress: approxfullListHint,
       latestRandomSeed
-    } = await contracts.hintHelpers.getApproxHint(newNICR, 5, this.latestRandomSeed)
+    } = await contracts.hintHelpers.getApproxHint(newNICR, 5, this.latestRandomSeed, shielded)
     this.latestRandomSeed = latestRandomSeed
 
     const {0: upperHint, 1: lowerHint} = await contracts.sortedTroves.findInsertPosition(newNICR, approxfullListHint, approxfullListHint)
@@ -915,7 +1045,6 @@ class TestHelper {
       })
 
       return gainsSum.concat(deposits2)
-
   }
 
   static async depositorValuesAfterThreeLiquidations(contracts, tx1, tx2, tx3, startDeposits, totalDeposits = null, totalDeposits1 = null, totalDeposits2 = null) {
@@ -1668,6 +1797,54 @@ class TestHelper {
       partialRedemptionNewICR,
       0, maxFee,
       { from: redeemer, gasPrice: gasPrice_toUse},
+    )
+
+    return tx
+  }
+
+  static async redeemCollateralForShutdown(redeemer, contracts, LUSDAmount, gasPrice = 0) {
+    const price = await contracts.priceFeedTestnet.getPrice()
+    const tx = await this.performRedemptionForShutdownTx(redeemer, price, contracts, LUSDAmount, gasPrice)
+    const gas = await this.gasUsed(tx)
+    return gas
+  }
+
+  static async redeemCollateralForShutdownAndGetTxObject(redeemer, contracts, LUSDAmount, gasPrice) {
+    if (gasPrice == undefined){
+      gasPrice = 0;
+    }
+    const price = await contracts.priceFeedTestnet.getPrice()
+    const tx = await this.performRedemptionForShutdownTx(redeemer, price, contracts, LUSDAmount, gasPrice)
+    return tx
+  }
+
+  static async performRedemptionForShutdownTx(redeemer, price, contracts, LUSDAmount, gasPrice_toUse = 0) {
+    const {
+      firstRedemptionHint,
+      partialRedemptionHintNICR
+    } = await contracts.hintHelpers.getRedemptionHints(LUSDAmount, price, gasPrice_toUse)
+
+    const { 0: upperPartialRedemptionHint, 1: lowerPartialRedemptionHint } = await contracts.sortedTroves.findInsertPosition(
+      partialRedemptionHintNICR,
+      redeemer,
+      redeemer
+    )
+    const { 0: upperShieldedPartialRedemptionHint, 1: lowerShieldedPartialRedemptionHint } = await contracts.sortedShieldedTroves.findInsertPosition(
+      partialRedemptionHintNICR,
+      redeemer,
+      redeemer
+    )
+
+    const tx = await contracts.troveManager.redeemCollateralForShutdown(
+      LUSDAmount,
+      firstRedemptionHint,
+      upperPartialRedemptionHint,
+      lowerPartialRedemptionHint,
+      upperShieldedPartialRedemptionHint,
+      lowerShieldedPartialRedemptionHint,
+      partialRedemptionHintNICR,
+      0,
+      { from: redeemer, gasPrice: gasPrice_toUse}
     )
 
     return tx

@@ -4,7 +4,7 @@ pragma solidity 0.8.24;
 
 import "../v0.8.24/Dependencies/AggregatorV3Interface.sol";
 import "../v0.8.24/Interfaces/IMainnetPriceFeed.sol";
-// import "../v0.8.24/BorrowerOperations.sol";
+import "../v0.8.24/Interfaces/IBorrowerOperations.sol";
 
 abstract contract MainnetPriceFeedBase is IMainnetPriceFeed {
     // Determines where the PriceFeed sources data from. Possible states:
@@ -37,15 +37,15 @@ abstract contract MainnetPriceFeedBase is IMainnetPriceFeed {
     // @note temporary
     uint256 public constant DECIMAL_PRECISION = 1e18;
     // @note temporary until shutdown is implemented in borrowerOperations
-    // IBorrowerOperations borrowerOperations;
+    IBorrowerOperations borrowerOperations;
 
-    constructor(address _ethUsdOracleAddress, uint256 _ethUsdStalenessThreshold /*, address _borrowOperationsAddress*/) {
+    constructor(address _ethUsdOracleAddress, uint256 _ethUsdStalenessThreshold , address _borrowOperationsAddress) {
         // Store ETH-USD oracle
         ethUsdOracle.aggregator = AggregatorV3Interface(_ethUsdOracleAddress);
         ethUsdOracle.stalenessThreshold = _ethUsdStalenessThreshold;
         ethUsdOracle.decimals = ethUsdOracle.aggregator.decimals();
 
-        // borrowerOperations = IBorrowerOperations(_borrowOperationsAddress);
+        borrowerOperations = IBorrowerOperations(_borrowOperationsAddress);
 
         assert(ethUsdOracle.decimals == 8);
     }
@@ -67,7 +67,7 @@ abstract contract MainnetPriceFeedBase is IMainnetPriceFeed {
 
     function _shutDownAndSwitchToLastGoodPrice(address _failedOracleAddr) internal returns (uint256) {
         // Shut down the branch
-        // borrowerOperations.shutdownFromOracleFailure();
+        borrowerOperations.shutdownFromOracleFailure();
 
         priceSource = PriceSource.lastGoodPrice;
 

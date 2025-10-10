@@ -5822,9 +5822,9 @@ contract('TroveManager - Shielded', async accounts => {
     // --- SETUP ---
 
     const amount = await getOpenTroveLUSDAmount(dec(210, 18))
-    await openShieldedTrove({ ICR: toBN(dec(200, 16)), extraParams: { from: alice } })
-    await openShieldedTrove({ ICR: toBN(dec(133, 16)), extraLUSDAmount: amount, extraParams: { from: bob } })
-    await openShieldedTrove({ ICR: toBN(dec(20, 18)), extraParams: { from: dennis } })
+    await openTrove({ ICR: toBN(dec(200, 16)), extraParams: { from: alice } })
+    await openTrove({ ICR: toBN(dec(133, 16)), extraLUSDAmount: amount, extraParams: { from: bob } })
+    await openTrove({ ICR: toBN(dec(20, 18)), extraParams: { from: dennis } })
 
     await lusdToken.transfer(carol, amount, { from: bob })
 
@@ -6020,8 +6020,8 @@ contract('TroveManager - Shielded', async accounts => {
     // skip bootstrapping phase
     await th.fastForwardTime(timeValues.SECONDS_IN_ONE_WEEK * 2, web3.currentProvider)
 
-    await assertRevert(th.redeemCollateralAndGetTxObject(A, contracts, dec(10, 18), GAS_PRICE ,dec(2, 18)), "Max fee percentage must be between 0.5% and 100%")
-    await assertRevert(th.redeemCollateralAndGetTxObject(A, contracts, dec(10, 18), GAS_PRICE, '1000000000000000001'), "Max fee percentage must be between 0.5% and 100%")
+    await assertRevert(th.redeemCollateralAndGetTxObject(A, contracts, dec(10, 18), GAS_PRICE ,dec(2, 18)), "maxFee% out of [0.5,100]")
+    await assertRevert(th.redeemCollateralAndGetTxObject(A, contracts, dec(10, 18), GAS_PRICE, '1000000000000000001'), "maxFee% out of [0.5,100]")
   })
 
   it("redeemCollateral(): reverts if max fee < 0.5%", async () => { 
@@ -6033,9 +6033,9 @@ contract('TroveManager - Shielded', async accounts => {
     // skip bootstrapping phase
     await th.fastForwardTime(timeValues.SECONDS_IN_ONE_WEEK * 2, web3.currentProvider)
 
-    await assertRevert(th.redeemCollateralAndGetTxObject(A, contracts, GAS_PRICE, dec(10, 18), 0), "Max fee percentage must be between 0.5% and 100%")
-    await assertRevert(th.redeemCollateralAndGetTxObject(A, contracts, GAS_PRICE, dec(10, 18), 1), "Max fee percentage must be between 0.5% and 100%")
-    await assertRevert(th.redeemCollateralAndGetTxObject(A, contracts, GAS_PRICE, dec(10, 18), '4999999999999999'), "Max fee percentage must be between 0.5% and 100%")
+    await assertRevert(th.redeemCollateralAndGetTxObject(A, contracts, GAS_PRICE, dec(10, 18), 0), "maxFee% out of [0.5,100]")
+    await assertRevert(th.redeemCollateralAndGetTxObject(A, contracts, GAS_PRICE, dec(10, 18), 1), "maxFee% out of [0.5,100]")
+    await assertRevert(th.redeemCollateralAndGetTxObject(A, contracts, GAS_PRICE, dec(10, 18), '4999999999999999'), "maxFee% out of [0.5,100]")
   })
   it("redeemCollateral(): reverts if fee exceeds max fee percentage", async () => {
     const { totalDebt: A_totalDebt } = await openShieldedTrove({ ICR: toBN(dec(400, 16)), extraLUSDAmount: dec(80, 18), extraParams: { from: A } })
@@ -6370,7 +6370,7 @@ contract('TroveManager - Shielded', async accounts => {
       assert.isFalse(redemptionTx.receipt.status)
     } catch (error) {
       assert.include(error.message, "revert")
-      assert.include(error.message, "Requested redemption amount must be <= user's balance")
+      assert.include(error.message, "must be <= user's balance")
     }
 
     // Erin tries to redeem 401 LUSD
@@ -6403,7 +6403,7 @@ contract('TroveManager - Shielded', async accounts => {
       assert.isFalse(redemptionTx.receipt.status)
     } catch (error) {
       assert.include(error.message, "revert")
-      assert.include(error.message, "Requested redemption amount must be <= user's balance")
+      assert.include(error.message, "must be <= user's balance")
     }
 
     // Erin tries to redeem 239482309 LUSD
@@ -6436,7 +6436,7 @@ contract('TroveManager - Shielded', async accounts => {
       assert.isFalse(redemptionTx.receipt.status)
     } catch (error) {
       assert.include(error.message, "revert")
-      assert.include(error.message, "Requested redemption amount must be <= user's balance")
+      assert.include(error.message, "must be <= user's balance")
     }
 
     // Erin tries to redeem 2^256 - 1 LUSD
@@ -6471,7 +6471,7 @@ contract('TroveManager - Shielded', async accounts => {
       assert.isFalse(redemptionTx.receipt.status)
     } catch (error) {
       assert.include(error.message, "revert")
-      assert.include(error.message, "Requested redemption amount must be <= user's balance")
+      assert.include(error.message, "must be <= user's balance")
     }
   })
 
@@ -7777,7 +7777,7 @@ const expectedCollateralReceived = collateralDrawn.sub(fee)
     const LUSDRedemption = dec(10000, 18)
 
     D_balance_before = await lusdToken.balanceOf(D)
-    await assertRevert(th.redeemCollateralAndGetTxObject(D, contracts, LUSDRedemption, th._100pct), "TM: Unable to redeem any amount")
+    await assertRevert(th.redeemCollateralAndGetTxObject(D, contracts, LUSDRedemption, th._100pct), "TM: Unable to redeem")
     D_balance_after = await lusdToken.balanceOf(D)
 
     // D has same number of RD
